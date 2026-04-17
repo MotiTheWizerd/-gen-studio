@@ -1,9 +1,12 @@
+import { useEffect } from 'react'
 import { z } from 'zod'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { Slider } from '@/components/ui/slider'
 import { Switch } from '@/components/ui/switch'
+import { Dropdown } from '@/components/Dropdown'
+import { imageModels } from '@/providers/images'
 
 interface FieldMeta {
   key: string
@@ -23,8 +26,32 @@ interface Props {
  */
 export function ParamsPanel({ schema, values, onChange }: Props) {
   const fields = collectFields(schema)
+  const modelName = (values.model_name as string) ?? imageModels[0]?.model_name
+
+  useEffect(() => {
+    if (imageModels.length > 0 && values.model_name == null) {
+      onChange({ model_name: imageModels[0].model_name })
+    }
+    // onChange intentionally omitted — parents pass a new identity each render
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [values.model_name])
+
   return (
     <div className="flex flex-col gap-4">
+      {imageModels.length > 0 && (
+        <div className="flex flex-col gap-1.5">
+          <Label>Model</Label>
+          <Dropdown
+            options={imageModels.map((m) => ({
+              value: m.model_name,
+              label: m.model_name,
+            }))}
+            value={modelName}
+            onChange={(v) => onChange({ model_name: v })}
+            placeholder="Select model…"
+          />
+        </div>
+      )}
       {fields.map((f) => (
         <FieldRow
           key={f.key}

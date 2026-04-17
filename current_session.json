@@ -1,13 +1,13 @@
 {
-  "semantix_session_id": 40,
+  "semantix_session_id": 42,
 
   "session_date": "2026-04-17",
-  
+
   "indexed": true,
   "index_stats": {
-    "files": 0,
-    "symbols": 0,
-    "relations": 0
+    "files": 49,
+    "symbols": 472,
+    "relations": 1345
   },
-  "notes": ""
+  "notes": "Session 6 (Opus 4.7, 1M ctx). Shipped: (1) right pane of GenerationTab is now one scrollable gallery grid (2→5 cols) replacing the single-image MediaView + JobHistoryStrip combo — OutputCanvas renders all generations for the tab via live query newest-first, with running jobs rendered as pulsing <SkeletonTile> at the top of the grid (spinner + message + modelName stripe); JobHistoryStrip removed from GenerationTab (file still on disk, unused); (2) new reusable <ImageLightbox> at src/components/ImageLightbox.tsx built on @radix-ui/react-dialog — click any tile → fullscreen modal with backdrop-blur-md over bg-black/70, media at max-h/w 92vh/92vw, ←/→ keys + on-screen chevrons for prev/next within the tab's gallery, footer bar shows prompt + Download/Star/Delete + 'i / N' counter, Esc or backdrop click closes; action buttons on tiles and in footer stopPropagation so they don't trigger the lightbox. Repo hygiene: .env.example was already deleted pre-session (not restored, user ok); .semantix/ still not in .gitignore — churn will keep appearing in diffs until added."
 }

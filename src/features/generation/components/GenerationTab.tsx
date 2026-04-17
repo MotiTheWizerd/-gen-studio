@@ -1,3 +1,5 @@
+import { useMemo } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import { Loader2, Play, Square } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -7,13 +9,13 @@ import { useJobsStore } from '../jobs.store'
 import { useRunJob } from '../useRunJob'
 import { ParamsPanel } from './ParamsPanel'
 import { OutputCanvas } from './OutputCanvas'
-import { JobHistoryStrip } from './JobHistoryStrip'
 
 export function GenerationTab({ tabId }: { tabId: string }) {
   const tab = useTabsStore((s) => s.tabs.find((t) => t.id === tabId))
   const updateParams = useTabsStore((s) => s.updateParams)
-  const job = useJobsStore((s) => s.byTab[tabId])
-  const { run, cancel } = useRunJob(tabId)
+  const jobs = useJobsStore(useShallow((s) => s.byTab[tabId]))
+  const list = useMemo(() => jobs ?? [], [jobs])
+  const { run, cancelAll } = useRunJob(tabId)
 
   if (!tab) return null
   const model = getModel(tab.modelId)
@@ -25,7 +27,9 @@ export function GenerationTab({ tabId }: { tabId: string }) {
     )
   }
 
-  const running = job?.status === 'running'
+  const running = list.filter((j) => j.status === 'running')
+  const latestRunning = running[running.length - 1]
+  const lastError = [...list].reverse().find((j) => j.status === 'error')
 
   return (
     <div className="grid h-full min-h-0 grid-cols-[360px_1fr]">
@@ -47,30 +51,26 @@ export function GenerationTab({ tabId }: { tabId: string }) {
             />
           </div>
         </ScrollArea>
-        <div className="border-t p-3">
-          {running ? (
-            <Button variant="destructive" className="w-full" onClick={cancel}>
-              <Square className="h-4 w-4" />
-              Cancel
+        <div className="flex flex-col gap-2 border-t p-3">
+          <div className="flex gap-2">
+            <Button className="flex-1" onClick={run}>
+              <Play className="h-4 w-4" />
+              Run{running.length > 0 ? ` (+${running.length})` : ''}
             </Button>
-          ) : (
-            <Button className="w-full" onClick={run}>
-              {job?.status === 'done' ? (
-                <Play className="h-4 w-4" />
-              ) : (
-                <Play className="h-4 w-4" />
-              )}
-              Run
-            </Button>
-          )}
-          {job?.status === 'error' && (
-            <p className="mt-2 text-xs text-destructive">{job.error}</p>
-          )}
-          {job?.status === 'running' && (
-            <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+            {running.length > 0 && (
+              <Button variant="destructive" size="icon" onClick={cancelAll}>
+                <Square className="h-4 w-4" />
+              </Button>
+            )}
+          </div>
+          {latestRunning && (
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
               <Loader2 className="h-3 w-3 animate-spin" />
-              {job.message ?? 'working…'}
+              {latestRunning.message ?? 'working…'}
             </div>
+          )}
+          {lastError && !latestRunning && (
+            <p className="text-xs text-destructive">{lastError.error}</p>
           )}
         </div>
       </aside>
@@ -78,7 +78,6 @@ export function GenerationTab({ tabId }: { tabId: string }) {
         <div className="min-h-0 flex-1">
           <OutputCanvas tabId={tabId} />
         </div>
-        <JobHistoryStrip tabId={tabId} />
       </section>
     </div>
   )

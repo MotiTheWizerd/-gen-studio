@@ -1,17 +1,24 @@
 import { useCallback } from 'react'
 import { toast } from 'sonner'
 import { getModel } from '@/providers/registry'
+import {
+  getImageModel,
+  imageModels,
+  runTextToImage,
+  runImageToImage,
+} from '@/providers/images'
 import { saveGeneration } from '@/db/generations.repo'
 import { useTabsStore } from '@/features/tabs/tabs.store'
 import { useJobsStore } from './jobs.store'
 
 export function useRunJob(tabId: string) {
-  const setJob = useJobsStore((s) => s.setJob)
-  const cancel = useJobsStore((s) => s.cancel)
-  const tab = useTabsStore((s) => s.tabs.find((t) => t.id === tabId))
+  const addJob = useJobsStore((s) => s.addJob)
+  const updateJob = useJobsStore((s) => s.updateJob)
+  const cancelTab = useJobsStore((s) => s.cancelTab)
   const markRun = useTabsStore((s) => s.markRun)
 
   const run = useCallback(async () => {
+    const tab = useTabsStore.getState().tabs.find((t) => t.id === tabId)
     if (!tab) return
     const model = getModel(tab.modelId)
     if (!model) {
@@ -19,31 +26,63 @@ export function useRunJob(tabId: string) {
       return
     }
 
+    const selectedName =
+      (tab.params.model_name as string | undefined) ??
+      (model.kind === 'image' ? imageModels[0]?.model_name : undefined)
+    const imageModel = selectedName ? getImageModel(selectedName) : undefined
+
     const controller = new AbortController()
-    setJob(tabId, {
-      status: 'running',
+    const job = addJob(tabId, {
+      controller,
       pct: 0,
       message: 'starting…',
-      error: undefined,
-      controller,
-      startedAt: Date.now(),
-      endedAt: undefined,
+      modelName: imageModel?.model_name ?? model.label,
     })
+    const jobId = job.id
+    const paramsSnapshot = structuredClone(tab.params)
 
     try {
-      const result = await model.run(tab.params as never, {
-        signal: controller.signal,
-        onProgress: (p) => setJob(tabId, { pct: p.pct, message: p.message }),
-      })
+      interface SavedMedia {
+        kind: 'image' | 'video'
+        blob: Blob
+        mime: string
+        width?: number
+        height?: number
+        durationMs?: number
+      }
+
+      let media: SavedMedia[]
+      let modelIdForSave = model.id
+      let providerIdForSave = model.providerId
+
+      if (imageModel) {
+        const pipeline =
+          imageModel.model_type === 'text-to-image'
+            ? runTextToImage
+            : runImageToImage
+        const r = await pipeline(imageModel, paramsSnapshot, {
+          signal: controller.signal,
+          onProgress: (p) => updateJob(jobId, { pct: p.pct, message: p.message }),
+        })
+        media = r.media
+        modelIdForSave = imageModel.fal_endpoint
+        providerIdForSave = 'fal'
+      } else {
+        const r = await model.run(paramsSnapshot as never, {
+          signal: controller.signal,
+          onProgress: (p) => updateJob(jobId, { pct: p.pct, message: p.message }),
+        })
+        media = r.media
+      }
 
       const ids: string[] = []
-      for (const m of result.media) {
+      for (const m of media) {
         const rec = await saveGeneration({
           tabId,
-          modelId: model.id,
-          providerId: model.providerId,
+          modelId: modelIdForSave,
+          providerId: providerIdForSave,
           kind: m.kind,
-          params: tab.params,
+          params: paramsSnapshot,
           media: [
             {
               kind: m.kind,
@@ -59,17 +98,17 @@ export function useRunJob(tabId: string) {
       }
 
       markRun(tabId)
-      setJob(tabId, {
+      updateJob(jobId, {
         status: 'done',
         pct: 1,
         message: undefined,
         resultIds: ids,
         endedAt: Date.now(),
       })
-      toast.success('Done')
+      toast.success(`Done · ${job.modelName ?? 'job'}`)
     } catch (err) {
       if (controller.signal.aborted) {
-        setJob(tabId, {
+        updateJob(jobId, {
           status: 'cancelled',
           message: undefined,
           endedAt: Date.now(),
@@ -77,7 +116,7 @@ export function useRunJob(tabId: string) {
         return
       }
       const msg = err instanceof Error ? err.message : String(err)
-      setJob(tabId, {
+      updateJob(jobId, {
         status: 'error',
         error: msg,
         message: undefined,
@@ -85,10 +124,10 @@ export function useRunJob(tabId: string) {
       })
       toast.error(msg)
     }
-  }, [tab, tabId, setJob, markRun])
+  }, [tabId, addJob, updateJob, markRun])
 
   return {
     run,
-    cancel: () => cancel(tabId),
+    cancelAll: () => cancelTab(tabId),
   }
 }
