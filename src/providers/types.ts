@@ -1,6 +1,7 @@
 import type { z } from 'zod'
 
 export type MediaKind = 'image' | 'video'
+export type ModelKind = MediaKind | 'vision'
 
 export interface MediaResult {
   kind: MediaKind
@@ -11,8 +12,19 @@ export interface MediaResult {
   durationMs?: number
 }
 
+export interface TokenUsage {
+  promptTokens?: number
+  completionTokens?: number
+  totalTokens?: number
+  costUsd?: number
+}
+
 export interface JobResult {
+  /** Empty for vision-kind models. */
   media: MediaResult[]
+  /** Populated for vision-kind models — the model's textual response. */
+  text?: string
+  usage?: TokenUsage
   raw?: unknown
 }
 
@@ -24,7 +36,7 @@ export interface RunContext {
 export interface Model<P extends Record<string, unknown> = Record<string, unknown>> {
   id: string
   providerId: string
-  kind: MediaKind
+  kind: ModelKind
   label: string
   description?: string
   /**
@@ -43,7 +55,7 @@ export type AnyModel = Model<any>
 export interface Provider {
   id: string
   label: string
-  kinds: MediaKind[]
+  kinds: ModelKind[]
   /** Optional key check — if returns false, ProvidersPage will flag missing keys. */
   isConfigured?: () => boolean
   /** Optional human-readable setup hint for ProvidersPage. */

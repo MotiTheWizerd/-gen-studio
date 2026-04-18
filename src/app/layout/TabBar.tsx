@@ -13,7 +13,7 @@ import {
   useSortable,
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { Image as ImageIcon, Plus, Video as VideoIcon, X } from 'lucide-react'
+import { Eye as EyeIcon, Image as ImageIcon, Plus, Video as VideoIcon, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/cn'
 import { getModel, allModels } from '@/providers/registry'
@@ -33,7 +33,8 @@ function TabPill({ tab }: { tab: GenTab }) {
   const close = useTabsStore((s) => s.close)
   const isActive = activeId === tab.id
   const model = getModel(tab.modelId)
-  const Icon = model?.kind === 'video' ? VideoIcon : ImageIcon
+  const Icon =
+    model?.kind === 'video' ? VideoIcon : model?.kind === 'vision' ? EyeIcon : ImageIcon
 
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useSortable({ id: tab.id })
@@ -101,7 +102,8 @@ function NewTabMenu() {
         <DropdownMenuLabel>New tab</DropdownMenuLabel>
         <DropdownMenuSeparator />
         {models.map((m) => {
-          const Icon = m.kind === 'video' ? VideoIcon : ImageIcon
+          const Icon =
+            m.kind === 'video' ? VideoIcon : m.kind === 'vision' ? EyeIcon : ImageIcon
           return (
             <DropdownMenuItem key={m.id} onSelect={() => open(m.id)}>
               <Icon className="h-4 w-4 text-muted-foreground" />

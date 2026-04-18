@@ -9,6 +9,7 @@ import {
 } from '@/providers/images'
 import { saveGeneration } from '@/db/generations.repo'
 import { useTabsStore } from '@/features/tabs/tabs.store'
+import { applyPersonaToParams } from '@/features/characters/applyPersona'
 import { useJobsStore } from './jobs.store'
 
 export function useRunJob(tabId: string) {
@@ -44,9 +45,10 @@ export function useRunJob(tabId: string) {
       aspectHint,
     })
     const jobId = job.id
-    const paramsSnapshot = structuredClone(tab.params)
+    let paramsSnapshot = structuredClone(tab.params)
 
     try {
+      paramsSnapshot = await applyPersonaToParams(paramsSnapshot)
       interface SavedMedia {
         kind: 'image' | 'video'
         blob: Blob
@@ -56,7 +58,9 @@ export function useRunJob(tabId: string) {
         durationMs?: number
       }
 
-      let media: SavedMedia[]
+      let media: SavedMedia[] = []
+      let text: string | undefined
+      let usage: import('@/providers/types').TokenUsage | undefined
       let modelIdForSave = model.id
       let providerIdForSave = model.providerId
 
@@ -82,28 +86,45 @@ export function useRunJob(tabId: string) {
           onProgress: (p) => updateJob(jobId, { pct: p.pct, message: p.message }),
         })
         media = r.media
+        text = r.text
+        usage = r.usage
       }
 
       const ids: string[] = []
-      for (const m of media) {
+      if (model.kind === 'vision') {
+        // Vision models return text, not media — single record per run.
         const rec = await saveGeneration({
           tabId,
           modelId: modelIdForSave,
           providerId: providerIdForSave,
-          kind: m.kind,
+          kind: 'vision',
           params: paramsSnapshot,
-          media: [
-            {
-              kind: m.kind,
-              blob: m.blob,
-              mime: m.mime,
-              width: m.width,
-              height: m.height,
-              durationMs: m.durationMs,
-            },
-          ],
+          media: [],
+          text,
+          usage,
         })
         ids.push(rec.id)
+      } else {
+        for (const m of media) {
+          const rec = await saveGeneration({
+            tabId,
+            modelId: modelIdForSave,
+            providerId: providerIdForSave,
+            kind: m.kind,
+            params: paramsSnapshot,
+            media: [
+              {
+                kind: m.kind,
+                blob: m.blob,
+                mime: m.mime,
+                width: m.width,
+                height: m.height,
+                durationMs: m.durationMs,
+              },
+            ],
+          })
+          ids.push(rec.id)
+        }
       }
 
       markRun(tabId)

@@ -75,6 +75,7 @@ export function GenerationTab({ tabId }: { tabId: string }) {
               schema={model.paramSchema}
               values={tab.params}
               onChange={(patch) => updateParams(tabId, patch)}
+              modelKind={model.kind}
             />
           </div>
         </ScrollArea>

@@ -1,6 +1,8 @@
 import { Fragment, useEffect, useRef } from 'react'
+import { Link } from 'react-router-dom'
 import { z } from 'zod'
-import { ImagePlus } from 'lucide-react'
+import { ImagePlus, Users } from 'lucide-react'
+import { useLiveQuery } from 'dexie-react-hooks'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
@@ -9,6 +11,13 @@ import { Switch } from '@/components/ui/switch'
 import { Button } from '@/components/ui/button'
 import { Dropdown } from '@/components/Dropdown'
 import { imageModels, getImageModel } from '@/providers/images'
+import { db } from '@/db/dexie'
+import type { ModelKind } from '@/providers/types'
+
+const MODES = [
+  { value: 'standard', label: 'Standard' },
+  { value: 'persona_replacement', label: 'Persona replacement' },
+] as const
 
 const MAX_INPUT_IMAGES = 3
 
@@ -31,17 +40,28 @@ interface Props {
   schema: z.ZodType
   values: Record<string, unknown>
   onChange: (patch: Record<string, unknown>) => void
+  modelKind?: ModelKind
 }
 
 /**
  * Introspect a top-level zod object schema and render a form for each field.
  * Supports: string, number (w/ slider if min+max), boolean, optional.
  */
-export function ParamsPanel({ schema, values, onChange }: Props) {
+export function ParamsPanel({ schema, values, onChange, modelKind }: Props) {
   const fields = collectFields(schema)
   const modelName = (values.model_name as string) ?? imageModels[0]?.model_name
   const selectedImageModel = getImageModel(modelName)
   const supportsEdit = selectedImageModel?.support_edit === true
+  const isImageModel = modelKind === 'image'
+  const mode = (values.mode as 'standard' | 'persona_replacement' | undefined) ?? 'standard'
+  const personaId = values.persona_id as string | undefined
+  const personas = useLiveQuery(
+    () =>
+      isImageModel && mode === 'persona_replacement'
+        ? db.personas.orderBy('name').toArray()
+        : Promise.resolve([]),
+    [isImageModel, mode],
+  )
 
   useEffect(() => {
     if (imageModels.length > 0 && values.model_name == null) {
@@ -76,6 +96,45 @@ export function ParamsPanel({ schema, values, onChange }: Props) {
 
   return (
     <div className="flex flex-col gap-4" onPaste={handlePaste}>
+      {isImageModel && (
+        <div className="flex flex-col gap-1.5">
+          <Label>Mode</Label>
+          <Dropdown
+            options={MODES.map((m) => ({ value: m.value, label: m.label }))}
+            value={mode}
+            onChange={(v) =>
+              onChange({
+                mode: v,
+                ...(v === 'standard' ? { persona_id: undefined } : {}),
+              })
+            }
+          />
+        </div>
+      )}
+      {isImageModel && mode === 'persona_replacement' && (
+        <div className="flex flex-col gap-1.5">
+          <Label>Persona</Label>
+          {personas && personas.length > 0 ? (
+            <Dropdown
+              options={personas.map((p) => ({
+                value: p.id,
+                label: p.name || '(unnamed)',
+              }))}
+              value={personaId}
+              onChange={(v) => onChange({ persona_id: v })}
+              placeholder="Select persona…"
+            />
+          ) : (
+            <Link
+              to="/characters/new"
+              className="flex items-center gap-2 rounded-md border border-dashed bg-background/40 px-3 py-2 text-xs text-muted-foreground hover:border-primary/50 hover:bg-accent/30"
+            >
+              <Users className="h-3.5 w-3.5" />
+              No personas yet — create one
+            </Link>
+          )}
+        </div>
+      )}
       {imageModels.length > 0 && (
         <>
           <div className="flex flex-col gap-1.5">

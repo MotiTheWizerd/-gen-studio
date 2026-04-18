@@ -7,6 +7,7 @@ import {
   Settings,
   Image,
   Film,
+  Users,
   PanelLeftClose,
   PanelLeftOpen,
   type LucideIcon,
@@ -49,6 +50,7 @@ const items: NavItem[] = [
     match: (p, s) => p === '/studio' && !new URLSearchParams(s).get('task'),
   },
   { to: '/library', label: 'Library', icon: Library },
+  { to: '/characters', label: 'Consist Characters', icon: Users },
   { to: '/providers', label: 'Providers', icon: Plug },
   { to: '/settings', label: 'Settings', icon: Settings },
 ]

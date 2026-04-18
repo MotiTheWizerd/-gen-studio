@@ -2,7 +2,7 @@ import { useTabsStore } from '@/features/tabs/tabs.store'
 import { GenerationTab } from './components/GenerationTab'
 import { allModels } from '@/providers/registry'
 import { Button } from '@/components/ui/button'
-import { Image as ImageIcon, Video as VideoIcon } from 'lucide-react'
+import { Image as ImageIcon, Video as VideoIcon, Eye as EyeIcon } from 'lucide-react'
 
 export function StudioPage() {
   const activeId = useTabsStore((s) => s.activeId)
@@ -25,7 +25,8 @@ export function StudioPage() {
         </p>
         <div className="mt-6 grid grid-cols-2 gap-3 text-left">
           {models.map((m) => {
-            const Icon = m.kind === 'video' ? VideoIcon : ImageIcon
+            const Icon =
+              m.kind === 'video' ? VideoIcon : m.kind === 'vision' ? EyeIcon : ImageIcon
             return (
               <Button
                 key={m.id}
