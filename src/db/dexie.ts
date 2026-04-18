@@ -26,20 +26,8 @@ export interface GenerationRecord {
   starred: 0 | 1
 }
 
-export interface PersonaRecord {
-  id: string
-  name: string
-  facial_details: string
-  body_shape: string
-  /** Reserved — populated when multi-user lands. */
-  user_id?: string
-  createdAt: number
-  updatedAt: number
-}
-
 export class VibeDB extends Dexie {
   generations!: Table<GenerationRecord, string>
-  personas!: Table<PersonaRecord, string>
 
   constructor() {
     super('vibe-studio')
@@ -50,6 +38,12 @@ export class VibeDB extends Dexie {
     this.version(2).stores({
       generations: 'id, tabId, modelId, providerId, kind, createdAt, starred',
       personas: 'id, name, createdAt, updatedAt, user_id',
+    })
+    // v3: personas moved out of Dexie — the sidecar server + Postgres is the
+    // source of truth now (see src/lib/personaApi.ts). Drop the store.
+    this.version(3).stores({
+      generations: 'id, tabId, modelId, providerId, kind, createdAt, starred',
+      personas: null,
     })
   }
 }

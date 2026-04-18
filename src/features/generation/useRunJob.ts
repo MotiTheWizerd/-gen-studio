@@ -10,7 +10,11 @@ import {
 import { saveGeneration } from '@/db/generations.repo'
 import { useTabsStore } from '@/features/tabs/tabs.store'
 import { applyPersonaToParams } from '@/features/characters/applyPersona'
+import { applyPersonaSwitcherToParams } from '@/features/characters/personaSwitcher'
+import { createLogger } from '@/lib/log'
 import { useJobsStore } from './jobs.store'
+
+const log = createLogger('run-job')
 
 export function useRunJob(tabId: string) {
   const addJob = useJobsStore((s) => s.addJob)
@@ -47,8 +51,25 @@ export function useRunJob(tabId: string) {
     const jobId = job.id
     let paramsSnapshot = structuredClone(tab.params)
 
+    log.info('▶ run start', {
+      jobId,
+      tabId,
+      modelId: model.id,
+      modelKind: model.kind,
+      mode: paramsSnapshot.mode,
+      personaId: paramsSnapshot.persona_id,
+      hasInputImages:
+        ((paramsSnapshot.input_images as unknown[] | undefined)?.length ?? 0) > 0,
+      imageModel: imageModel?.model_name,
+    })
+    const stopRun = log.timer('full run')
+
     try {
       paramsSnapshot = await applyPersonaToParams(paramsSnapshot)
+      paramsSnapshot = await applyPersonaSwitcherToParams(paramsSnapshot, {
+        signal: controller.signal,
+        onProgress: (msg) => updateJob(jobId, { message: msg }),
+      })
       interface SavedMedia {
         kind: 'image' | 'video'
         blob: Blob
@@ -128,6 +149,8 @@ export function useRunJob(tabId: string) {
       }
 
       markRun(tabId)
+      stopRun()
+      log.info('✅ run done', { jobId, savedRecords: ids.length })
       updateJob(jobId, {
         status: 'done',
         pct: 1,
@@ -137,7 +160,9 @@ export function useRunJob(tabId: string) {
       })
       toast.success(`Done · ${job.modelName ?? 'job'}`)
     } catch (err) {
+      stopRun()
       if (controller.signal.aborted) {
+        log.warn('🟡 run cancelled', { jobId })
         updateJob(jobId, {
           status: 'cancelled',
           message: undefined,
@@ -146,6 +171,7 @@ export function useRunJob(tabId: string) {
         return
       }
       const msg = err instanceof Error ? err.message : String(err)
+      log.error('❌ run failed', { jobId, msg, err })
       updateJob(jobId, {
         status: 'error',
         error: msg,

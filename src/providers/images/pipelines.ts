@@ -2,6 +2,10 @@ import { fal } from '@fal-ai/client'
 import { runImageModel, type GeneratedImage } from './run'
 import { ensureFalConfigured } from './fal'
 import type { ImageModel } from './models'
+import { createLogger } from '@/lib/log'
+import { compressImageForUpload } from '@/lib/imageCompress'
+
+const log = createLogger('image-pipeline')
 
 export interface PipelineMedia {
   kind: 'image'
@@ -100,16 +104,35 @@ export async function runImageEdit(
     throw new Error('At least one input image is required for editing')
   }
 
+  log.info('runImageEdit start', {
+    model: model.model_name,
+    endpoint,
+    images: dataUris.length,
+    promptChars: prompt.length,
+    promptPreview: prompt.slice(0, 200),
+  })
+
   ensureFalConfigured()
 
   ctx.onProgress?.({ message: `uploading ${dataUris.length} image(s)…` })
+  const stopUpload = log.timer('upload input images to fal.storage')
   const image_urls = await Promise.all(
-    dataUris.map(async (uri) => {
-      const blob = await (await fetch(uri)).blob()
+    dataUris.map(async (uri, i) => {
+      const rawBlob = await (await fetch(uri)).blob()
       if (ctx.signal.aborted) throw new DOMException('Aborted', 'AbortError')
-      return fal.storage.upload(blob)
+      const blob = await compressImageForUpload(rawBlob)
+      if (ctx.signal.aborted) throw new DOMException('Aborted', 'AbortError')
+      const url = await fal.storage.upload(blob)
+      log.info(`uploaded input #${i}`, {
+        rawBytes: rawBlob.size,
+        uploadedBytes: blob.size,
+        mime: blob.type,
+        url,
+      })
+      return url
     }),
   )
+  stopUpload()
 
   if (ctx.signal.aborted) throw new DOMException('Aborted', 'AbortError')
 
@@ -133,17 +156,35 @@ export async function runImageEdit(
   }
 
   ctx.onProgress?.({ message: `editing with ${model.model_name}…` })
+  const stopEdit = log.timer(`fal edit ${endpoint}`)
 
-  const result = await runImageModel(model, input, {
-    endpoint,
-    onLog: (m) => ctx.onProgress?.({ message: m }),
+  let result
+  try {
+    result = await runImageModel(model, input, {
+      endpoint,
+      signal: ctx.signal,
+      onLog: (m) => {
+        log.info(`fal log: ${m}`)
+        ctx.onProgress?.({ message: m })
+      },
+    })
+  } catch (err) {
+    log.error('image-edit fal call failed', err)
+    throw err
+  }
+  stopEdit()
+  log.info('runImageEdit result', {
+    images: result.images.length,
+    requestId: result.requestId,
   })
 
   if (ctx.signal.aborted) throw new DOMException('Aborted', 'AbortError')
 
+  const stopFetch = log.timer('fetch generated images as blobs')
   const media = await Promise.all(
     result.images.map((img) => fetchAsBlob(img, ctx.signal)),
   )
+  stopFetch()
 
   return { media, raw: result.raw }
 }

@@ -12,6 +12,9 @@ dist
 dist-ssr
 *.local
 
+# Server-managed uploads (persona images etc.)
+/data/
+
 # env
 .env
 .env.local

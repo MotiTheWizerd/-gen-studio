@@ -1,8 +1,6 @@
 import { Fragment, useEffect, useRef } from 'react'
-import { Link } from 'react-router-dom'
 import { z } from 'zod'
-import { ImagePlus, Users } from 'lucide-react'
-import { useLiveQuery } from 'dexie-react-hooks'
+import { ImagePlus } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
@@ -11,13 +9,16 @@ import { Switch } from '@/components/ui/switch'
 import { Button } from '@/components/ui/button'
 import { Dropdown } from '@/components/Dropdown'
 import { imageModels, getImageModel } from '@/providers/images'
-import { db } from '@/db/dexie'
+import { PersonaPicker } from '@/features/characters/PersonaPicker'
 import type { ModelKind } from '@/providers/types'
 
 const MODES = [
   { value: 'standard', label: 'Standard' },
   { value: 'persona_replacement', label: 'Persona replacement' },
+  { value: 'persona_switcher', label: 'Persona switcher (from image)' },
 ] as const
+
+type Mode = (typeof MODES)[number]['value']
 
 const MAX_INPUT_IMAGES = 3
 
@@ -53,15 +54,9 @@ export function ParamsPanel({ schema, values, onChange, modelKind }: Props) {
   const selectedImageModel = getImageModel(modelName)
   const supportsEdit = selectedImageModel?.support_edit === true
   const isImageModel = modelKind === 'image'
-  const mode = (values.mode as 'standard' | 'persona_replacement' | undefined) ?? 'standard'
+  const mode = (values.mode as Mode | undefined) ?? 'standard'
   const personaId = values.persona_id as string | undefined
-  const personas = useLiveQuery(
-    () =>
-      isImageModel && mode === 'persona_replacement'
-        ? db.personas.orderBy('name').toArray()
-        : Promise.resolve([]),
-    [isImageModel, mode],
-  )
+  const showPersonaPicker = isImageModel && mode !== 'standard'
 
   useEffect(() => {
     if (imageModels.length > 0 && values.model_name == null) {
@@ -111,28 +106,13 @@ export function ParamsPanel({ schema, values, onChange, modelKind }: Props) {
           />
         </div>
       )}
-      {isImageModel && mode === 'persona_replacement' && (
+      {showPersonaPicker && (
         <div className="flex flex-col gap-1.5">
           <Label>Persona</Label>
-          {personas && personas.length > 0 ? (
-            <Dropdown
-              options={personas.map((p) => ({
-                value: p.id,
-                label: p.name || '(unnamed)',
-              }))}
-              value={personaId}
-              onChange={(v) => onChange({ persona_id: v })}
-              placeholder="Select persona…"
-            />
-          ) : (
-            <Link
-              to="/characters/new"
-              className="flex items-center gap-2 rounded-md border border-dashed bg-background/40 px-3 py-2 text-xs text-muted-foreground hover:border-primary/50 hover:bg-accent/30"
-            >
-              <Users className="h-3.5 w-3.5" />
-              No personas yet — create one
-            </Link>
-          )}
+          <PersonaPicker
+            value={personaId}
+            onChange={(v) => onChange({ persona_id: v })}
+          />
         </div>
       )}
       {imageModels.length > 0 && (

@@ -9,11 +9,31 @@ import { Textarea } from '@/components/ui/textarea'
 import { Dropdown } from '@/components/Dropdown'
 import {
   createPersona,
+  deletePersonaImage,
   getPersona,
+  IMAGE_SLOTS,
   updatePersona,
-} from '@/db/personas.repo'
+  uploadPersonaImage,
+  type ImageSlot,
+  type PersonaImage,
+} from '@/lib/personaApi'
 import { VISION_MODELS } from '@/providers/vision'
 import { analyzePersona } from './analyze'
+
+type SlotState =
+  | { kind: 'empty' }
+  | { kind: 'remote'; image: PersonaImage }
+  | { kind: 'pending'; blob: Blob; objectUrl: string }
+
+type SlotMap = Record<ImageSlot, SlotState>
+
+const emptySlots: SlotMap = {
+  face: { kind: 'empty' },
+  body: { kind: 'empty' },
+  ref_1: { kind: 'empty' },
+  ref_2: { kind: 'empty' },
+  ref_3: { kind: 'empty' },
+}
 
 export function PersonaEditor() {
   const { id } = useParams<{ id: string }>()
@@ -24,12 +44,30 @@ export function PersonaEditor() {
   const [name, setName] = useState('')
   const [facialDetails, setFacialDetails] = useState('')
   const [bodyShape, setBodyShape] = useState('')
-  const [faceImage, setFaceImage] = useState<Blob | null>(null)
-  const [bodyImage, setBodyImage] = useState<Blob | null>(null)
+  const [slots, setSlots] = useState<SlotMap>(emptySlots)
+  // Tracks which slots had a remote image when we loaded. If that slot is now
+  // empty on save, we need to DELETE it server-side.
+  const [originalRemote, setOriginalRemote] = useState<Record<ImageSlot, boolean>>({
+    face: false,
+    body: false,
+    ref_1: false,
+    ref_2: false,
+    ref_3: false,
+  })
   const [model, setModel] = useState<string>(VISION_MODELS[0].id)
   const [analyzing, setAnalyzing] = useState(false)
   const [progress, setProgress] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+
+  // Revoke any object URLs on unmount / slot change.
+  useEffect(() => {
+    return () => {
+      for (const s of Object.values(slots)) {
+        if (s.kind === 'pending') URL.revokeObjectURL(s.objectUrl)
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   useEffect(() => {
     if (isNew) return
@@ -45,28 +83,71 @@ export function PersonaEditor() {
       setName(p.name)
       setFacialDetails(p.facial_details)
       setBodyShape(p.body_shape)
+
+      const next: SlotMap = { ...emptySlots }
+      const original: Record<ImageSlot, boolean> = { ...originalRemote }
+      for (const img of p.images) {
+        next[img.slot] = { kind: 'remote', image: img }
+        original[img.slot] = true
+      }
+      setSlots(next)
+      setOriginalRemote(original)
       setLoading(false)
     })()
     return () => {
       cancelled = true
     }
-  }, [id, isNew, navigate])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, isNew])
 
-  const facePreview = useObjectUrl(faceImage)
-  const bodyPreview = useObjectUrl(bodyImage)
+  function setSlot(slot: ImageSlot, next: SlotState) {
+    setSlots((prev) => {
+      const current = prev[slot]
+      if (current.kind === 'pending') URL.revokeObjectURL(current.objectUrl)
+      return { ...prev, [slot]: next }
+    })
+  }
 
-  const canAnalyze = (faceImage || bodyImage) && !analyzing
+  function pickFile(slot: ImageSlot, file: Blob) {
+    const objectUrl = URL.createObjectURL(file)
+    setSlot(slot, { kind: 'pending', blob: file, objectUrl })
+  }
+
+  function clearSlot(slot: ImageSlot) {
+    setSlot(slot, { kind: 'empty' })
+  }
+
+  const canAnalyze = useMemo(() => {
+    const hasFaceOrBody =
+      slots.face.kind !== 'empty' || slots.body.kind !== 'empty'
+    return hasFaceOrBody && !analyzing
+  }, [slots, analyzing])
+
   const canSave = name.trim().length > 0 && !saving
 
+  async function slotToBlob(state: SlotState): Promise<Blob | undefined> {
+    if (state.kind === 'pending') return state.blob
+    if (state.kind === 'remote') {
+      const res = await fetch(state.image.url)
+      if (!res.ok) throw new Error(`Fetch ${state.image.url} failed: ${res.status}`)
+      return await res.blob()
+    }
+    return undefined
+  }
+
   async function handleAnalyze() {
-    if (!faceImage && !bodyImage) return
+    if (!canAnalyze) return
     const controller = new AbortController()
     setAnalyzing(true)
     setProgress('starting…')
     try {
+      const [faceBlob, bodyBlob] = await Promise.all([
+        slotToBlob(slots.face),
+        slotToBlob(slots.body),
+      ])
       const out = await analyzePersona({
-        faceImage: faceImage ?? undefined,
-        bodyImage: bodyImage ?? undefined,
+        faceImage: faceBlob,
+        bodyImage: bodyBlob,
         model,
         signal: controller.signal,
         onProgress: (m) => setProgress(m),
@@ -75,8 +156,7 @@ export function PersonaEditor() {
       if (out.body_shape) setBodyShape(out.body_shape)
       toast.success('Analysis complete')
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      toast.error(msg)
+      toast.error(err instanceof Error ? err.message : String(err))
     } finally {
       setAnalyzing(false)
       setProgress(null)
@@ -87,18 +167,31 @@ export function PersonaEditor() {
     if (!canSave) return
     setSaving(true)
     try {
-      const payload = {
+      const textPayload = {
         name: name.trim(),
         facial_details: facialDetails.trim(),
         body_shape: bodyShape.trim(),
       }
+      let personaId: string
       if (isNew) {
-        await createPersona(payload)
-        toast.success('Persona created')
+        const created = await createPersona(textPayload)
+        personaId = created.id
       } else {
-        await updatePersona(id!, payload)
-        toast.success('Persona saved')
+        personaId = id!
+        await updatePersona(personaId, textPayload)
       }
+
+      // Reconcile image slots: upload pending, delete cleared originals.
+      for (const slot of IMAGE_SLOTS) {
+        const s = slots[slot]
+        if (s.kind === 'pending') {
+          await uploadPersonaImage(personaId, slot, s.blob)
+        } else if (s.kind === 'empty' && originalRemote[slot]) {
+          await deletePersonaImage(personaId, slot)
+        }
+      }
+
+      toast.success(isNew ? 'Persona created' : 'Persona saved')
       navigate('/characters')
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err))
@@ -143,21 +236,45 @@ export function PersonaEditor() {
             />
           </div>
 
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <ImageSlot
-              label="Face image"
-              hint="Drop or click — face to camera"
-              preview={facePreview}
-              onPick={setFaceImage}
-              onClear={() => setFaceImage(null)}
-            />
-            <ImageSlot
-              label="Body image"
-              hint="Drop or click — full body (optional)"
-              preview={bodyPreview}
-              onPick={setBodyImage}
-              onClear={() => setBodyImage(null)}
-            />
+          <div>
+            <Label className="mb-2 block">Main images</Label>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <ImageSlotView
+                label="Face"
+                hint="Drop or click — face to camera"
+                state={slots.face}
+                onPick={(f) => pickFile('face', f)}
+                onClear={() => clearSlot('face')}
+              />
+              <ImageSlotView
+                label="Body"
+                hint="Drop or click — full body (optional)"
+                state={slots.body}
+                onPick={(f) => pickFile('body', f)}
+                onClear={() => clearSlot('body')}
+              />
+            </div>
+          </div>
+
+          <div>
+            <Label className="mb-2 block">
+              Reference images{' '}
+              <span className="text-xs font-normal text-muted-foreground">
+                — attached alongside face/body when generating
+              </span>
+            </Label>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+              {(['ref_1', 'ref_2', 'ref_3'] as const).map((slot, idx) => (
+                <ImageSlotView
+                  key={slot}
+                  label={`Reference ${idx + 1}`}
+                  hint="Drop or click — any extra angle/style"
+                  state={slots[slot]}
+                  onPick={(f) => pickFile(slot, f)}
+                  onClear={() => clearSlot(slot)}
+                />
+              ))}
+            </div>
           </div>
 
           <div className="flex flex-col gap-1.5">
@@ -220,20 +337,27 @@ export function PersonaEditor() {
   )
 }
 
-function ImageSlot({
+function ImageSlotView({
   label,
   hint,
-  preview,
+  state,
   onPick,
   onClear,
 }: {
   label: string
   hint: string
-  preview: string | null
+  state: SlotState
   onPick: (b: Blob) => void
   onClear: () => void
 }) {
   const inputId = useMemo(() => `slot-${Math.random().toString(36).slice(2, 9)}`, [])
+
+  const previewUrl =
+    state.kind === 'pending'
+      ? state.objectUrl
+      : state.kind === 'remote'
+        ? state.image.url
+        : null
 
   function handleFiles(files: FileList | null) {
     const f = files?.[0]
@@ -257,10 +381,10 @@ function ImageSlot({
         }}
         className="group relative flex aspect-square cursor-pointer items-center justify-center overflow-hidden rounded-md border border-dashed border-input bg-background/40 text-xs text-muted-foreground hover:border-primary/50 hover:bg-accent/30"
       >
-        {preview ? (
+        {previewUrl ? (
           <>
             <img
-              src={preview}
+              src={previewUrl}
               alt=""
               className="h-full w-full object-cover no-drag"
             />
@@ -292,18 +416,4 @@ function ImageSlot({
       </label>
     </div>
   )
-}
-
-function useObjectUrl(blob: Blob | null): string | null {
-  const [url, setUrl] = useState<string | null>(null)
-  useEffect(() => {
-    if (!blob) {
-      setUrl(null)
-      return
-    }
-    const u = URL.createObjectURL(blob)
-    setUrl(u)
-    return () => URL.revokeObjectURL(u)
-  }, [blob])
-  return url
 }

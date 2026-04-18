@@ -1,7 +1,8 @@
 import { nanoid } from 'nanoid'
 import { create } from 'zustand'
-import { persist } from 'zustand/middleware'
+import { persist, createJSONStorage } from 'zustand/middleware'
 import { getModel } from '@/providers/registry'
+import { createDebouncedStorage } from '@/lib/debounced-storage'
 
 const HEAVY_PARAM_KEYS = new Set(['input_images'])
 
@@ -108,6 +109,9 @@ export const useTabsStore = create<TabsState>()(
     {
       name: 'vibe-studio-tabs',
       version: 2,
+      // Debounced so typing in a prompt doesn't fire a sync localStorage
+      // write (and a full JSON.stringify of all tabs) on every keystroke.
+      storage: createJSONStorage(() => createDebouncedStorage(500)),
       partialize: (s) => ({
         // Strip heavy/ephemeral fields (e.g. base64 input_images) so
         // localStorage doesn't blow past its quota.

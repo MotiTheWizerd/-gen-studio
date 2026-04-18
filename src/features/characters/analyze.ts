@@ -23,10 +23,15 @@ export interface AnalyzeOutput {
   body_shape?: string
 }
 
+interface AnalyzePart {
+  key: 'face' | 'body'
+  text: string
+}
+
 export async function analyzePersona(input: AnalyzeInput): Promise<AnalyzeOutput> {
   const { faceImage, bodyImage, model, signal, onProgress } = input
 
-  const tasks: Promise<['face' | 'body', string]>[] = []
+  const tasks: Promise<AnalyzePart>[] = []
 
   if (faceImage) {
     tasks.push(
@@ -39,7 +44,7 @@ export async function analyzePersona(input: AnalyzeInput): Promise<AnalyzeOutput
           temperature: 0.4,
         },
         { signal, onProgress: (p) => p.message && onProgress?.(`face: ${p.message}`) },
-      ).then((r) => ['face' as const, r.text.trim()]),
+      ).then((r) => ({ key: 'face', text: r.text.trim() })),
     )
   }
 
@@ -54,15 +59,15 @@ export async function analyzePersona(input: AnalyzeInput): Promise<AnalyzeOutput
           temperature: 0.4,
         },
         { signal, onProgress: (p) => p.message && onProgress?.(`body: ${p.message}`) },
-      ).then((r) => ['body' as const, r.text.trim()]),
+      ).then((r) => ({ key: 'body', text: r.text.trim() })),
     )
   }
 
   const out: AnalyzeOutput = {}
   const results = await Promise.all(tasks)
-  for (const [key, text] of results) {
-    if (key === 'face') out.facial_details = text
-    else out.body_shape = text
+  for (const part of results) {
+    if (part.key === 'face') out.facial_details = part.text
+    else out.body_shape = part.text
   }
   return out
 }

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { useShallow } from 'zustand/react/shallow'
 import { Download, Loader2, Trash2, Star } from 'lucide-react'
@@ -14,25 +14,50 @@ interface Props {
   tabId: string
 }
 
+const PAGE_SIZE = 30
+
 export function OutputCanvas({ tabId }: Props) {
   const runningJobs = useJobsStore(
     useShallow((s) =>
       (s.byTab[tabId] ?? []).filter((j) => j.status === 'running'),
     ),
   )
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE)
+
+  // Walk the createdAt index newest-first and filter by tabId, so we only
+  // pull `visibleCount` records (and their blobs) into memory — not the
+  // entire tab's history.
   const rows =
     useLiveQuery(
       () =>
         db.generations
-          .where('tabId')
-          .equals(tabId)
+          .orderBy('createdAt')
           .reverse()
-          .sortBy('createdAt'),
-      [tabId],
+          .filter((r) => r.tabId === tabId)
+          .limit(visibleCount)
+          .toArray(),
+      [tabId, visibleCount],
     ) ?? []
+
+  const totalCount =
+    useLiveQuery(
+      () => db.generations.where('tabId').equals(tabId).count(),
+      [tabId],
+    ) ?? 0
+
+  // Reset pagination when switching tabs so we don't leak a high count from
+  // a previous tab into the new one.
+  useEffect(() => {
+    setVisibleCount(PAGE_SIZE)
+  }, [tabId])
 
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null)
   const empty = rows.length === 0 && runningJobs.length === 0
+  const remaining = Math.max(0, totalCount - rows.length)
+
+  // Stable across re-renders so GalleryTile's React.memo shallow compare
+  // can short-circuit when nothing about its record changed.
+  const handleOpen = useCallback((i: number) => setLightboxIndex(i), [])
 
   return (
     <ScrollArea className="h-full">
@@ -40,18 +65,32 @@ export function OutputCanvas({ tabId }: Props) {
         {empty ? (
           <EmptyState />
         ) : (
-          <div className="flex flex-wrap gap-3">
-            {[...runningJobs].reverse().map((j) => (
-              <SkeletonTile key={j.id} job={j} />
-            ))}
-            {rows.map((r, i) => (
-              <GalleryTile
-                key={r.id}
-                rec={r}
-                onOpen={() => setLightboxIndex(i)}
-              />
-            ))}
-          </div>
+          <>
+            <div className="flex flex-wrap gap-3">
+              {[...runningJobs].reverse().map((j) => (
+                <SkeletonTile key={j.id} job={j} />
+              ))}
+              {rows.map((r, i) => (
+                <GalleryTile
+                  key={r.id}
+                  rec={r}
+                  index={i}
+                  onOpen={handleOpen}
+                />
+              ))}
+            </div>
+            {remaining > 0 && (
+              <div className="mt-4 flex justify-center">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setVisibleCount((c) => c + PAGE_SIZE)}
+                >
+                  Load {Math.min(PAGE_SIZE, remaining)} older · {remaining} remaining
+                </Button>
+              </div>
+            )}
+          </>
         )}
       </div>
       <ImageLightbox
@@ -137,13 +176,13 @@ function useInView<T extends Element>(rootMargin: string) {
   return [ref, inView] as const
 }
 
-function GalleryTile({
-  rec,
-  onOpen,
-}: {
+interface GalleryTileProps {
   rec: GenerationRecord
-  onOpen: () => void
-}) {
+  index: number
+  onOpen: (index: number) => void
+}
+
+const GalleryTile = memo(function GalleryTile({ rec, index, onOpen }: GalleryTileProps) {
   const blob = rec.media[0]?.blob
   const [url, setUrl] = useState<string | null>(null)
   const [tileRef, inView] = useInView<HTMLDivElement>('600px')
@@ -179,7 +218,7 @@ function GalleryTile({
       ref={tileRef}
       className="group relative block cursor-zoom-in overflow-hidden rounded-lg border bg-muted"
       style={{ height: ROW_H, width: ROW_H * mediaAspect }}
-      onClick={onOpen}
+      onClick={() => onOpen(index)}
     >
       {url ? (
         isVideo ? (
@@ -249,7 +288,7 @@ function GalleryTile({
       </div>
     </div>
   )
-}
+})
 
 function ext(mime: string): string {
   if (mime.includes('png')) return 'png'

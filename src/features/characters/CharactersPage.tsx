@@ -1,15 +1,10 @@
 import { Link } from 'react-router-dom'
-import { useLiveQuery } from 'dexie-react-hooks'
 import { Plus, Trash2, Users } from 'lucide-react'
-import { db } from '@/db/dexie'
-import { deletePersona } from '@/db/personas.repo'
+import { deletePersona, usePersonas, type Persona } from '@/lib/personaApi'
 import { Button } from '@/components/ui/button'
 
 export function CharactersPage() {
-  const personas = useLiveQuery(
-    () => db.personas.orderBy('createdAt').reverse().toArray(),
-    [],
-  )
+  const personas = usePersonas()
 
   return (
     <div className="h-full overflow-auto p-6">
@@ -48,13 +43,11 @@ export function CharactersPage() {
               >
                 <Link to={`/characters/${p.id}`} className="block">
                   <div className="flex items-start gap-3">
-                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary/15 text-primary">
-                      <Users className="h-5 w-5" />
-                    </div>
+                    <PersonaThumb persona={p} />
                     <div className="min-w-0 flex-1">
                       <h3 className="truncate text-sm font-medium">{p.name || 'Untitled'}</h3>
                       <p className="mt-0.5 text-xs text-muted-foreground">
-                        Updated {new Date(p.updatedAt).toLocaleDateString()}
+                        Updated {new Date(p.updated_at).toLocaleDateString()}
                       </p>
                     </div>
                   </div>
@@ -79,6 +72,24 @@ export function CharactersPage() {
           </div>
         )}
       </div>
+    </div>
+  )
+}
+
+function PersonaThumb({ persona }: { persona: Persona }) {
+  const face = persona.images.find((i) => i.slot === 'face')
+  if (face) {
+    return (
+      <img
+        src={face.url}
+        alt=""
+        className="h-10 w-10 shrink-0 rounded-full object-cover no-drag"
+      />
+    )
+  }
+  return (
+    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary/15 text-primary">
+      <Users className="h-5 w-5" />
     </div>
   )
 }

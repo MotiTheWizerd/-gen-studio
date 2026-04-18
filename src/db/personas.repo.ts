@@ -1,41 +1,15 @@
-import { nanoid } from 'nanoid'
-import { db, type PersonaRecord } from './dexie'
+// Personas used to live in Dexie. They moved to the sidecar server — see
+// src/lib/personaApi.ts. This file re-exports the API surface so existing
+// callers that imported `@/db/personas.repo` keep compiling.
 
-export type PersonaInput = Pick<
-  PersonaRecord,
-  'name' | 'facial_details' | 'body_shape' | 'user_id'
->
-
-export async function createPersona(input: PersonaInput): Promise<PersonaRecord> {
-  const now = Date.now()
-  const rec: PersonaRecord = {
-    id: nanoid(),
-    name: input.name,
-    facial_details: input.facial_details,
-    body_shape: input.body_shape,
-    user_id: input.user_id,
-    createdAt: now,
-    updatedAt: now,
-  }
-  await db.personas.add(rec)
-  return rec
-}
-
-export async function updatePersona(
-  id: string,
-  patch: Partial<PersonaInput>,
-): Promise<void> {
-  await db.personas.update(id, { ...patch, updatedAt: Date.now() })
-}
-
-export async function deletePersona(id: string): Promise<void> {
-  await db.personas.delete(id)
-}
-
-export async function getPersona(id: string): Promise<PersonaRecord | undefined> {
-  return db.personas.get(id)
-}
-
-export async function listPersonas(): Promise<PersonaRecord[]> {
-  return db.personas.orderBy('createdAt').reverse().toArray()
-}
+export {
+  createPersona,
+  deletePersona,
+  getPersona,
+  listPersonas,
+  updatePersona,
+  type Persona,
+  type PersonaInput,
+  type PersonaImage,
+  type ImageSlot,
+} from '@/lib/personaApi'
