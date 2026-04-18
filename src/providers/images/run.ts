@@ -20,6 +20,7 @@ export interface RunImageResult {
 export interface RunImageOptions {
   logs?: boolean
   onLog?: (message: string) => void
+  endpoint?: string
 }
 
 export async function runImageModel(
@@ -29,7 +30,8 @@ export async function runImageModel(
 ): Promise<RunImageResult> {
   ensureFalConfigured()
 
-  const result = await fal.subscribe(model.fal_endpoint, {
+  const endpoint = options.endpoint ?? model.fal_endpoint
+  const result = await fal.subscribe(endpoint, {
     input,
     logs: options.logs ?? true,
     onQueueUpdate: (update) => {

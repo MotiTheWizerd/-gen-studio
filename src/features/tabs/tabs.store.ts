@@ -3,6 +3,18 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { getModel } from '@/providers/registry'
 
+const HEAVY_PARAM_KEYS = new Set(['input_images'])
+
+function stripHeavy(
+  params: Record<string, unknown>,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
+  for (const [k, v] of Object.entries(params)) {
+    if (!HEAVY_PARAM_KEYS.has(k)) out[k] = v
+  }
+  return out
+}
+
 export interface GenTab {
   id: string
   title: string
@@ -95,8 +107,16 @@ export const useTabsStore = create<TabsState>()(
     }),
     {
       name: 'vibe-studio-tabs',
-      version: 1,
-      partialize: (s) => ({ tabs: s.tabs, activeId: s.activeId }),
+      version: 2,
+      partialize: (s) => ({
+        // Strip heavy/ephemeral fields (e.g. base64 input_images) so
+        // localStorage doesn't blow past its quota.
+        tabs: s.tabs.map((t) => ({
+          ...t,
+          params: stripHeavy(t.params),
+        })),
+        activeId: s.activeId,
+      }),
       onRehydrateStorage: () => (state) => {
         if (!state) return
         // Drop tabs whose model disappeared (e.g. provider removed)

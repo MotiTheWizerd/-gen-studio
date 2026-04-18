@@ -15,6 +15,7 @@ export interface JobState {
   startedAt?: number
   endedAt?: number
   modelName?: string
+  aspectHint?: string
 }
 
 interface JobsState {
@@ -24,6 +25,24 @@ interface JobsState {
   cancelJob: (jobId: string) => void
   cancelTab: (tabId: string) => void
   clearTab: (tabId: string) => void
+}
+
+const MAX_TERMINAL_JOBS_PER_TAB = 8
+
+function pruneTerminal(list: JobState[]): JobState[] {
+  // Keep all running jobs, plus the most recent N terminal jobs.
+  let keptTerminal = 0
+  const reversed: JobState[] = []
+  for (let i = list.length - 1; i >= 0; i--) {
+    const j = list[i]
+    if (j.status === 'running') {
+      reversed.push(j)
+    } else if (keptTerminal < MAX_TERMINAL_JOBS_PER_TAB) {
+      reversed.push(j)
+      keptTerminal++
+    }
+  }
+  return reversed.reverse()
 }
 
 export const useJobsStore = create<JobsState>((set, get) => ({
@@ -37,12 +56,16 @@ export const useJobsStore = create<JobsState>((set, get) => ({
       startedAt: Date.now(),
       ...seed,
     }
-    set((s) => ({
-      byTab: {
-        ...s.byTab,
-        [tabId]: [...(s.byTab[tabId] ?? []), job],
-      },
-    }))
+    set((s) => {
+      const existing = s.byTab[tabId] ?? []
+      const pruned = pruneTerminal(existing)
+      return {
+        byTab: {
+          ...s.byTab,
+          [tabId]: [...pruned, job],
+        },
+      }
+    })
     return job
   },
 
@@ -54,7 +77,17 @@ export const useJobsStore = create<JobsState>((set, get) => ({
         const idx = list.findIndex((j) => j.id === jobId)
         if (idx !== -1) {
           const updated = [...list]
-          updated[idx] = { ...updated[idx], ...patch }
+          let merged: JobState = { ...updated[idx], ...patch }
+          // Drop the AbortController on terminal transitions so the
+          // controller (and any closures it holds) can be GC'd.
+          if (
+            patch.status &&
+            patch.status !== 'running' &&
+            merged.controller
+          ) {
+            merged = { ...merged, controller: undefined }
+          }
+          updated[idx] = merged
           next[tabId] = updated
           break
         }

@@ -5,7 +5,7 @@ import {
   getImageModel,
   imageModels,
   runTextToImage,
-  runImageToImage,
+  runImageEdit,
 } from '@/providers/images'
 import { saveGeneration } from '@/db/generations.repo'
 import { useTabsStore } from '@/features/tabs/tabs.store'
@@ -32,11 +32,16 @@ export function useRunJob(tabId: string) {
     const imageModel = selectedName ? getImageModel(selectedName) : undefined
 
     const controller = new AbortController()
+    const aspectHint =
+      typeof tab.params.image_size === 'string'
+        ? (tab.params.image_size as string)
+        : undefined
     const job = addJob(tabId, {
       controller,
       pct: 0,
       message: 'starting…',
       modelName: imageModel?.model_name ?? model.label,
+      aspectHint,
     })
     const jobId = job.id
     const paramsSnapshot = structuredClone(tab.params)
@@ -56,16 +61,20 @@ export function useRunJob(tabId: string) {
       let providerIdForSave = model.providerId
 
       if (imageModel) {
-        const pipeline =
-          imageModel.model_type === 'text-to-image'
-            ? runTextToImage
-            : runImageToImage
+        const inputImages =
+          (paramsSnapshot.input_images as string[] | undefined) ?? []
+        const useEdit =
+          imageModel.model_type === 'image-to-image' ||
+          (imageModel.support_edit && inputImages.length > 0)
+        const pipeline = useEdit ? runImageEdit : runTextToImage
         const r = await pipeline(imageModel, paramsSnapshot, {
           signal: controller.signal,
           onProgress: (p) => updateJob(jobId, { pct: p.pct, message: p.message }),
         })
         media = r.media
-        modelIdForSave = imageModel.fal_endpoint
+        modelIdForSave = useEdit
+          ? (imageModel.fal_edit_endpoint ?? imageModel.fal_endpoint)
+          : imageModel.fal_endpoint
         providerIdForSave = 'fal'
       } else {
         const r = await model.run(paramsSnapshot as never, {

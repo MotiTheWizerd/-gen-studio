@@ -9,9 +9,6 @@ import type { Model, Provider } from '../types'
 
 const imageSchema = z.object({
   prompt: z.string().min(1).describe('Prompt'),
-  width: z.number().int().min(64).max(2048).default(1024).describe('Width'),
-  height: z.number().int().min(64).max(2048).default(1024).describe('Height'),
-  steps: z.number().int().min(1).max(50).default(20).describe('Steps'),
   seed: z.number().int().optional().describe('Seed (optional)'),
 })
 type ImageParams = z.infer<typeof imageSchema>
@@ -23,8 +20,12 @@ const videoSchema = z.object({
 })
 type VideoParams = z.infer<typeof videoSchema>
 
-async function drawPlaceholderImage(params: ImageParams): Promise<Blob> {
-  const { width, height, prompt } = params
+async function drawPlaceholderImage(
+  params: ImageParams & { width?: number; height?: number },
+): Promise<Blob> {
+  const width = params.width ?? 1024
+  const height = params.height ?? 1024
+  const { prompt } = params
   const canvas = document.createElement('canvas')
   canvas.width = width
   canvas.height = height
@@ -94,7 +95,6 @@ async function drawPlaceholderVideo(params: VideoParams): Promise<Blob> {
     prompt: `${params.prompt}\n(stub video ${params.duration}s @ ${params.fps}fps)`,
     width: 1024,
     height: 576,
-    steps: 1,
   })
   return new Blob([await frame.arrayBuffer()], { type: 'image/png' })
 }
@@ -106,7 +106,7 @@ const stubImage: Model<ImageParams> = {
   label: 'Stub Image',
   description: 'Local placeholder image for testing the pipeline',
   paramSchema: imageSchema,
-  defaults: { prompt: 'a neon dreamscape', width: 1024, height: 1024, steps: 20 },
+  defaults: { prompt: 'a neon dreamscape' },
   run: async (params, { signal, onProgress }) => {
     for (let i = 0; i < 5; i++) {
       if (signal.aborted) throw new DOMException('Aborted', 'AbortError')

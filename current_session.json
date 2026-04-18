@@ -1,13 +1,13 @@
 {
-  "semantix_session_id": 42,
+  "semantix_session_id": 44,
 
-  "session_date": "2026-04-17",
+  "session_date": "2026-04-18",
 
   "indexed": true,
   "index_stats": {
-    "files": 49,
-    "symbols": 472,
-    "relations": 1345
+    "files": 51,
+    "symbols": 558,
+    "relations": 1579
   },
-  "notes": "Session 6 (Opus 4.7, 1M ctx). Shipped: (1) right pane of GenerationTab is now one scrollable gallery grid (2→5 cols) replacing the single-image MediaView + JobHistoryStrip combo — OutputCanvas renders all generations for the tab via live query newest-first, with running jobs rendered as pulsing <SkeletonTile> at the top of the grid (spinner + message + modelName stripe); JobHistoryStrip removed from GenerationTab (file still on disk, unused); (2) new reusable <ImageLightbox> at src/components/ImageLightbox.tsx built on @radix-ui/react-dialog — click any tile → fullscreen modal with backdrop-blur-md over bg-black/70, media at max-h/w 92vh/92vw, ←/→ keys + on-screen chevrons for prev/next within the tab's gallery, footer bar shows prompt + Download/Star/Delete + 'i / N' counter, Esc or backdrop click closes; action buttons on tiles and in footer stopPropagation so they don't trigger the lightbox. Repo hygiene: .env.example was already deleted pre-session (not restored, user ok); .semantix/ still not in .gitignore — churn will keep appearing in diffs until added."
+  "notes": "Session 8 (Opus 4.7, 1M ctx). Diagnosed + fixed image-editor slowdown that pegged memory until the OS choked. Root causes were stacked: (a) Dexie's useLiveQuery in OutputCanvas re-runs on every write, returning fresh Blob refs — the per-tile useEffect([blob]) revoked & re-created its ObjectURL on every Dexie change, forcing every <img> to re-decode → linear cost in gallery size per write; (b) the gallery flex-wrapped ALL rows simultaneously, holding decoded textures in GPU memory for every image — unbounded; (c) jobs.byTab grew forever because done/error/cancelled jobs were never pruned and retained their AbortController refs; (d) zustand persist serialises all tabs synchronously on every prompt keystroke; (e) input_images sit in tab.params as multi-MB base64 data URIs. Shipped fixes #1+#3+#2: (1) NEW src/lib/blob-url-cache.ts — refcounted ObjectURL cache keyed by record id with 100ms delayed revoke for strict-mode double-effects; OutputCanvas GalleryTile + ImageLightbox LightboxMedia now call acquireBlobUrl(rec.id, blob)/releaseBlobUrl(rec.id) instead of churning per blob ref; effect dep flipped from [blob] → [rec.id]. (3) jobs.store.ts — added pruneTerminal() helper, addJob keeps all running + last MAX_TERMINAL_JOBS_PER_TAB=8 terminal per tab; updateJob clears merged.controller on terminal status transitions so AbortController + closures GC. (2) Gallery virtualization via IntersectionObserver: new useInView<T>(rootMargin) hook in OutputCanvas; GalleryTile attaches tileRef to outer div, only acquires URL + renders <img> when within 600px of viewport; when scrolled far offscreen, img unmounts → URL released → texture freed. SkeletonTile untouched (running jobs are few). Tile divs stay mounted with fixed dimensions so scroll layout never shifts. Still TODO from earlier diagnosis: #4 debounce zustand persist (every-keystroke localStorage write), #5 move input_images from base64 data-URI strings to Blob[] in a non-persisted store + render via ObjectURL (would also unblock structuredClone cost in useRunJob). Pushed at end of session."
 }

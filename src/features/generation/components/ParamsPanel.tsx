@@ -1,12 +1,25 @@
-import { useEffect } from 'react'
+import { Fragment, useEffect, useRef } from 'react'
 import { z } from 'zod'
+import { ImagePlus } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { Slider } from '@/components/ui/slider'
 import { Switch } from '@/components/ui/switch'
+import { Button } from '@/components/ui/button'
 import { Dropdown } from '@/components/Dropdown'
-import { imageModels } from '@/providers/images'
+import { imageModels, getImageModel } from '@/providers/images'
+
+const MAX_INPUT_IMAGES = 3
+
+const IMAGE_SIZE_PRESETS = [
+  { value: 'square_hd', label: 'Square HD · 1024×1024' },
+  { value: 'square', label: 'Square · 512×512' },
+  { value: 'portrait_4_3', label: 'Portrait 4:3 · 768×1024' },
+  { value: 'portrait_16_9', label: 'Portrait 16:9 · 576×1024' },
+  { value: 'landscape_4_3', label: 'Landscape 4:3 · 1024×768' },
+  { value: 'landscape_16_9', label: 'Landscape 16:9 · 1024×576' },
+]
 
 interface FieldMeta {
   key: string
@@ -27,6 +40,8 @@ interface Props {
 export function ParamsPanel({ schema, values, onChange }: Props) {
   const fields = collectFields(schema)
   const modelName = (values.model_name as string) ?? imageModels[0]?.model_name
+  const selectedImageModel = getImageModel(modelName)
+  const supportsEdit = selectedImageModel?.support_edit === true
 
   useEffect(() => {
     if (imageModels.length > 0 && values.model_name == null) {
@@ -36,32 +51,132 @@ export function ParamsPanel({ schema, values, onChange }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [values.model_name])
 
+  const handlePaste = (e: React.ClipboardEvent<HTMLDivElement>) => {
+    if (!supportsEdit) return
+    const files: File[] = []
+    for (const item of Array.from(e.clipboardData.items)) {
+      if (item.kind === 'file' && item.type.startsWith('image/')) {
+        const f = item.getAsFile()
+        if (f) files.push(f)
+      }
+    }
+    if (files.length === 0) return
+    e.preventDefault()
+    const current = (values.input_images as string[] | undefined) ?? []
+    const remaining = Math.max(0, MAX_INPUT_IMAGES - current.length)
+    if (remaining === 0) return
+    const toAdd = files.slice(0, remaining)
+    void (async () => {
+      const urls = await Promise.all(toAdd.map(fileToDataURL))
+      onChange({
+        input_images: [...current, ...urls].slice(0, MAX_INPUT_IMAGES),
+      })
+    })()
+  }
+
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-4" onPaste={handlePaste}>
       {imageModels.length > 0 && (
-        <div className="flex flex-col gap-1.5">
-          <Label>Model</Label>
-          <Dropdown
-            options={imageModels.map((m) => ({
-              value: m.model_name,
-              label: m.model_name,
-            }))}
-            value={modelName}
-            onChange={(v) => onChange({ model_name: v })}
-            placeholder="Select model…"
-          />
-        </div>
+        <>
+          <div className="flex flex-col gap-1.5">
+            <Label>Model</Label>
+            <Dropdown
+              options={imageModels.map((m) => ({
+                value: m.model_name,
+                label: m.model_name,
+              }))}
+              value={modelName}
+              onChange={(v) => onChange({ model_name: v })}
+              placeholder="Select model…"
+            />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label>Image size</Label>
+            <Dropdown
+              options={IMAGE_SIZE_PRESETS}
+              value={(values.image_size as string) ?? 'square_hd'}
+              onChange={(v) => onChange({ image_size: v })}
+              placeholder="Image size…"
+            />
+          </div>
+        </>
       )}
       {fields.map((f) => (
-        <FieldRow
-          key={f.key}
-          field={f}
-          value={values[f.key]}
-          onChange={(v) => onChange({ [f.key]: v })}
-        />
+        <Fragment key={f.key}>
+          <FieldRow
+            field={f}
+            value={values[f.key]}
+            onChange={(v) => onChange({ [f.key]: v })}
+          />
+          {f.key === 'prompt' && supportsEdit && (
+            <ImageUploadButton
+              current={(values.input_images as string[] | undefined) ?? []}
+              onChange={(imgs) => onChange({ input_images: imgs })}
+            />
+          )}
+        </Fragment>
       ))}
     </div>
   )
+}
+
+function ImageUploadButton({
+  current,
+  onChange,
+}: {
+  current: string[]
+  onChange: (imgs: string[]) => void
+}) {
+  const inputRef = useRef<HTMLInputElement>(null)
+  const remaining = Math.max(0, MAX_INPUT_IMAGES - current.length)
+
+  const handleFiles = async (files: FileList | null) => {
+    if (!files || files.length === 0) return
+    const selected = Array.from(files).slice(0, remaining)
+    const urls = await Promise.all(selected.map(fileToDataURL))
+    onChange([...current, ...urls].slice(0, MAX_INPUT_IMAGES))
+  }
+
+  return (
+    <div>
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/*"
+        multiple
+        className="hidden"
+        onChange={(e) => {
+          void handleFiles(e.target.files)
+          e.target.value = ''
+        }}
+      />
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        disabled={remaining === 0}
+        onClick={() => inputRef.current?.click()}
+        className="w-full justify-start"
+      >
+        <ImagePlus className="h-4 w-4" />
+        Add image
+        {current.length > 0 && (
+          <span className="ml-auto text-xs text-muted-foreground">
+            {current.length}/{MAX_INPUT_IMAGES}
+          </span>
+        )}
+      </Button>
+    </div>
+  )
+}
+
+function fileToDataURL(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader()
+    r.onload = () => resolve(r.result as string)
+    r.onerror = () => reject(r.error)
+    r.readAsDataURL(file)
+  })
 }
 
 function FieldRow({

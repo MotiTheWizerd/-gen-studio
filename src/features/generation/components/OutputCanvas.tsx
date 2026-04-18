@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { useShallow } from 'zustand/react/shallow'
 import { Download, Loader2, Trash2, Star } from 'lucide-react'
 import { db, type GenerationRecord } from '@/db/dexie'
 import { deleteGeneration, toggleStar } from '@/db/generations.repo'
+import { acquireBlobUrl, releaseBlobUrl } from '@/lib/blob-url-cache'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { ImageLightbox } from '@/components/ImageLightbox'
@@ -39,7 +40,7 @@ export function OutputCanvas({ tabId }: Props) {
         {empty ? (
           <EmptyState />
         ) : (
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+          <div className="flex flex-wrap gap-3">
             {[...runningJobs].reverse().map((j) => (
               <SkeletonTile key={j.id} job={j} />
             ))}
@@ -75,9 +76,15 @@ function EmptyState() {
   )
 }
 
+const ROW_H = 220
+
 function SkeletonTile({ job }: { job: JobState }) {
+  const aspect = aspectRatioFromPreset(job.aspectHint) ?? 1
   return (
-    <div className="group relative aspect-square overflow-hidden rounded-lg border bg-muted">
+    <div
+      className="group relative block overflow-hidden rounded-lg border bg-muted"
+      style={{ height: ROW_H, width: ROW_H * aspect }}
+    >
       <div className="absolute inset-0 animate-pulse bg-gradient-to-br from-muted via-muted-foreground/10 to-muted" />
       <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-muted-foreground">
         <Loader2 className="h-6 w-6 animate-spin" />
@@ -94,6 +101,42 @@ function SkeletonTile({ job }: { job: JobState }) {
   )
 }
 
+function aspectRatioFromPreset(hint?: string): number | null {
+  switch (hint) {
+    case 'square_hd':
+    case 'square':
+      return 1
+    case 'portrait_4_3':
+      return 3 / 4
+    case 'portrait_16_9':
+      return 9 / 16
+    case 'landscape_4_3':
+      return 4 / 3
+    case 'landscape_16_9':
+      return 16 / 9
+    default:
+      return null
+  }
+}
+
+function useInView<T extends Element>(rootMargin: string) {
+  const ref = useRef<T>(null)
+  const [inView, setInView] = useState(false)
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const obs = new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) setInView(e.isIntersecting)
+      },
+      { rootMargin },
+    )
+    obs.observe(el)
+    return () => obs.disconnect()
+  }, [rootMargin])
+  return [ref, inView] as const
+}
+
 function GalleryTile({
   rec,
   onOpen,
@@ -103,12 +146,17 @@ function GalleryTile({
 }) {
   const blob = rec.media[0]?.blob
   const [url, setUrl] = useState<string | null>(null)
+  const [tileRef, inView] = useInView<HTMLDivElement>('600px')
+
   useEffect(() => {
-    if (!blob) return
-    const u = URL.createObjectURL(blob)
-    setUrl(u)
-    return () => URL.revokeObjectURL(u)
-  }, [blob])
+    if (!inView || !blob) return
+    setUrl(acquireBlobUrl(rec.id, blob))
+    return () => {
+      releaseBlobUrl(rec.id)
+      setUrl(null)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [inView, rec.id])
 
   const isVideo = rec.kind === 'video' && blob?.type.startsWith('video/')
   const prompt = String((rec.params as { prompt?: string }).prompt ?? rec.modelId)
@@ -121,9 +169,16 @@ function GalleryTile({
     a.click()
   }
 
+  const mediaAspect =
+    rec.media[0]?.width && rec.media[0]?.height
+      ? rec.media[0].width / rec.media[0].height
+      : 1
+
   return (
     <div
-      className="group relative aspect-square cursor-zoom-in overflow-hidden rounded-lg border bg-muted"
+      ref={tileRef}
+      className="group relative block cursor-zoom-in overflow-hidden rounded-lg border bg-muted"
+      style={{ height: ROW_H, width: ROW_H * mediaAspect }}
       onClick={onOpen}
     >
       {url ? (

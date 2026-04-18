@@ -13,6 +13,7 @@ export {
 export { ensureFalConfigured } from './fal'
 export {
   runTextToImage,
+  runImageEdit,
   runImageToImage,
   type PipelineMedia,
   type PipelineResult,

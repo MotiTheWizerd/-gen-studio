@@ -1,5 +1,6 @@
 import { Outlet, useLocation } from 'react-router-dom'
 import { TooltipProvider } from '@/components/ui/tooltip'
+import { useUIStore } from '@/app/state/ui.store'
 import { Sidebar } from './Sidebar'
 import { Header } from './Header'
 import { TabBar } from './TabBar'
@@ -7,10 +8,16 @@ import { TabBar } from './TabBar'
 export function AppShell() {
   const location = useLocation()
   const showTabs = location.pathname.startsWith('/studio')
+  const collapsed = useUIStore((s) => s.sidebarCollapsed)
 
   return (
     <TooltipProvider delayDuration={200}>
-      <div className="grid h-full w-full grid-cols-[240px_1fr] grid-rows-[56px_1fr] bg-background">
+      <div
+        className="grid h-full w-full grid-rows-[56px_1fr] bg-background transition-[grid-template-columns] duration-200"
+        style={{
+          gridTemplateColumns: `${collapsed ? 64 : 240}px 1fr`,
+        }}
+      >
         <div className="col-span-2 row-start-1 row-end-2">
           <Header />
         </div>

@@ -11,6 +11,7 @@ import {
 import { Button } from '@/components/ui/button'
 import type { GenerationRecord } from '@/db/dexie'
 import { deleteGeneration, toggleStar } from '@/db/generations.repo'
+import { acquireBlobUrl, releaseBlobUrl } from '@/lib/blob-url-cache'
 
 interface Props {
   items: GenerationRecord[]
@@ -130,10 +131,10 @@ function LightboxMedia({ rec }: { rec: GenerationRecord }) {
   const [url, setUrl] = useState<string | null>(null)
   useEffect(() => {
     if (!blob) return
-    const u = URL.createObjectURL(blob)
-    setUrl(u)
-    return () => URL.revokeObjectURL(u)
-  }, [blob])
+    setUrl(acquireBlobUrl(rec.id, blob))
+    return () => releaseBlobUrl(rec.id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rec.id])
 
   if (!url) return null
   const isVideo = rec.kind === 'video' && blob?.type.startsWith('video/')
