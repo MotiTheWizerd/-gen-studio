@@ -17,6 +17,7 @@ export interface RunImageResult {
   images: GeneratedImage[]
   description?: string
   requestId?: string
+  has_nsfw_concepts?: boolean[]
   raw: unknown
 }
 
@@ -41,12 +42,18 @@ export async function runImageModel(
     if (typeof v === 'string') {
       inputSummary[k] = v.length > 200 ? `${v.slice(0, 200)}…(${v.length})` : v
     } else if (Array.isArray(v)) {
-      inputSummary[k] = `[${v.length} items]`
+      inputSummary[k] = v.every((x) => typeof x === 'string')
+        ? v
+        : `[${v.length} items]`
     } else {
       inputSummary[k] = v
     }
   }
-  log.info('fal.subscribe ▶', { endpoint, input: inputSummary })
+  log.info('fal.subscribe ▶', {
+    endpoint,
+    inputKeys: Object.keys(input),
+    input: inputSummary,
+  })
 
   let result
   try {
@@ -68,17 +75,59 @@ export async function runImageModel(
       },
     })
   } catch (err) {
+    const e = err as {
+      status?: number
+      body?: unknown
+      response?: { status?: number; statusText?: string; body?: unknown }
+      message?: string
+      stack?: string
+    }
+    let responseBodyText: string | undefined
+    try {
+      const resp = (err as { response?: Response }).response
+      if (resp && typeof (resp as Response).clone === 'function') {
+        responseBodyText = await (resp as Response).clone().text()
+      }
+    } catch {
+      /* ignore */
+    }
+    const bodyForLog = e.body ?? responseBodyText
+    const bodyString =
+      typeof bodyForLog === 'string'
+        ? bodyForLog
+        : (() => {
+            try {
+              return JSON.stringify(bodyForLog, null, 2)
+            } catch {
+              return String(bodyForLog)
+            }
+          })()
     log.error('fal.subscribe ✗ rejected', {
       endpoint,
-      err,
+      inputKeys: Object.keys(input),
+      inputPreview: (() => {
+        try {
+          return JSON.stringify(input, (_k, v) => (typeof v === 'string' && v.length > 200 ? `${v.slice(0, 200)}…(${v.length})` : v))
+        } catch {
+          return '[unserializable]'
+        }
+      })(),
+      status: e.status ?? e.response?.status,
+      statusText: e.response?.statusText,
+      bodyString,
       message: err instanceof Error ? err.message : String(err),
-      stack: err instanceof Error ? err.stack : undefined,
+      errName: err instanceof Error ? err.name : undefined,
     })
+    console.error('[vibe][image-run] full error body:\n' + bodyString)
     throw err
   }
 
   const data = result.data as
-    | { images?: GeneratedImage[]; description?: string }
+    | {
+        images?: GeneratedImage[]
+        description?: string
+        has_nsfw_concepts?: boolean[]
+      }
     | undefined
 
   log.info('fal.subscribe ✓ resolved', {
@@ -86,12 +135,14 @@ export async function runImageModel(
     requestId: result.requestId,
     imageCount: data?.images?.length ?? 0,
     hasDescription: typeof data?.description === 'string',
+    has_nsfw_concepts: data?.has_nsfw_concepts,
   })
 
   return {
     images: data?.images ?? [],
     description: data?.description,
     requestId: result.requestId,
+    has_nsfw_concepts: data?.has_nsfw_concepts,
     raw: result,
   }
 }

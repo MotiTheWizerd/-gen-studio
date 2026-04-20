@@ -1,11 +1,17 @@
 export type ImageModelType = 'text-to-image' | 'image-to-image'
 
+export type FalEditInputKey = 'image_urls' | 'image_url'
+export type FalPipeline = 'standard' | 'kontext-lora-inpaint'
+
 export interface ImageModel {
   model_name: string
   model_type: ImageModelType
   fal_endpoint: string
   fal_edit_endpoint?: string
   support_edit: boolean
+  fal_edit_input_key?: FalEditInputKey
+  fal_extra_input?: Record<string, unknown>
+  fal_pipeline?: FalPipeline
 }
 
 export const imageModels: ImageModel[] = [
@@ -15,6 +21,7 @@ export const imageModels: ImageModel[] = [
     fal_endpoint: 'fal-ai/nano-banana-2',
     fal_edit_endpoint: 'fal-ai/nano-banana-2/edit',
     support_edit: true,
+    fal_extra_input: { enable_safety_checker: false },
   },
   {
     model_name: 'GPT Image 1.5',
@@ -22,18 +29,21 @@ export const imageModels: ImageModel[] = [
     fal_endpoint: 'fal-ai/gpt-image-1.5',
     fal_edit_endpoint: 'fal-ai/gpt-image-1.5/edit',
     support_edit: true,
+    fal_extra_input: { enable_safety_checker: false },
   },
   {
     model_name: 'Z-Image Turbo',
     model_type: 'text-to-image',
     fal_endpoint: 'fal-ai/z-image/turbo',
     support_edit: false,
+    fal_extra_input: { enable_safety_checker: false },
   },
   {
     model_name: 'Ideogram V3',
     model_type: 'text-to-image',
     fal_endpoint: 'fal-ai/ideogram/v3',
     support_edit: false,
+    fal_extra_input: { enable_safety_checker: false },
   },
   {
     model_name: 'Seedream V5 Lite',
@@ -41,36 +51,42 @@ export const imageModels: ImageModel[] = [
     fal_endpoint: 'fal-ai/bytedance/seedream/v5/lite/text-to-image',
     fal_edit_endpoint: 'fal-ai/bytedance/seedream/v5/lite/edit',
     support_edit: true,
+    fal_extra_input: { enable_safety_checker: false },
   },
   {
     model_name: 'FLUX 2 Pro',
     model_type: 'text-to-image',
     fal_endpoint: 'fal-ai/flux-2-pro',
     support_edit: false,
+    fal_extra_input: { safety_tolerance: '5', enable_safety_checker: false },
   },
   {
     model_name: 'FLUX 2',
     model_type: 'text-to-image',
     fal_endpoint: 'fal-ai/flux-2',
     support_edit: false,
+    fal_extra_input: { enable_safety_checker: false },
   },
   {
     model_name: 'Grok Imagine',
     model_type: 'image-to-image',
     fal_endpoint: 'xai/grok-imagine-image',
     support_edit: true,
+    fal_extra_input: { enable_safety_checker: false },
   },
   {
     model_name: 'Ernie Image Turbo',
     model_type: 'text-to-image',
     fal_endpoint: 'fal-ai/ernie-image/turbo',
     support_edit: false,
+    fal_extra_input: { enable_safety_checker: false },
   },
   {
     model_name: 'Recraft V3',
     model_type: 'text-to-image',
     fal_endpoint: 'fal-ai/recraft/v3/text-to-image',
     support_edit: false,
+    fal_extra_input: { enable_safety_checker: false },
   },
   {
     model_name: 'Qwen Image 2 Pro',
@@ -78,6 +94,7 @@ export const imageModels: ImageModel[] = [
     fal_endpoint: 'fal-ai/qwen-image-2/pro/text-to-image',
     fal_edit_endpoint: 'fal-ai/qwen-image-2/pro/edit',
     support_edit: true,
+    fal_extra_input: { enable_safety_checker: false },
   },
   {
     model_name: 'Wan 2.7',
@@ -85,6 +102,7 @@ export const imageModels: ImageModel[] = [
     fal_endpoint: 'fal-ai/wan/v2.7/text-to-image',
     fal_edit_endpoint: 'fal-ai/wan/v2.7/edit',
     support_edit: true,
+    fal_extra_input: { enable_safety_checker: false },
   },
   {
     model_name: 'Qwen Image',
@@ -92,6 +110,7 @@ export const imageModels: ImageModel[] = [
     fal_endpoint: 'fal-ai/qwen-image',
     fal_edit_endpoint: 'fal-ai/qwen-image-edit',
     support_edit: true,
+    fal_extra_input: { enable_safety_checker: false },
   },
   {
     model_name: 'Seedream V4.5',
@@ -99,12 +118,41 @@ export const imageModels: ImageModel[] = [
     fal_endpoint: 'fal-ai/bytedance/seedream/v4.5/text-to-image',
     fal_edit_endpoint: 'fal-ai/bytedance/seedream/v4.5/edit',
     support_edit: true,
+    fal_extra_input: { enable_safety_checker: false },
   },
   {
     model_name: 'FLUX Pro Kontext Max',
     model_type: 'text-to-image',
     fal_endpoint: 'fal-ai/flux-pro/kontext/max',
-    support_edit: false,
+    support_edit: true,
+    fal_edit_input_key: 'image_url',
+    fal_extra_input: { safety_tolerance: '6', enable_safety_checker: false },
+  },
+  {
+    model_name: 'Kling Image V3',
+    model_type: 'text-to-image',
+    fal_endpoint: 'fal-ai/kling-image/v3/text-to-image',
+    fal_edit_endpoint: 'fal-ai/kling-image/v3/image-to-image',
+    support_edit: true,
+    fal_edit_input_key: 'image_url',
+    fal_extra_input: { enable_safety_checker: false },
+  },
+  {
+    model_name: 'Juggernaut FLUX Pro',
+    model_type: 'text-to-image',
+    fal_endpoint: 'rundiffusion-fal/juggernaut-flux/pro',
+    fal_edit_endpoint: 'rundiffusion-fal/juggernaut-flux/pro/image-to-image',
+    support_edit: true,
+    fal_edit_input_key: 'image_url',
+    fal_extra_input: { enable_safety_checker: false },
+  },
+  {
+    model_name: 'FLUX Kontext LoRA (inpaint)',
+    model_type: 'image-to-image',
+    fal_endpoint: 'fal-ai/flux-kontext-lora/inpaint',
+    support_edit: true,
+    fal_pipeline: 'kontext-lora-inpaint',
+    fal_extra_input: { enable_safety_checker: false, loras: [] },
   },
 ]
 

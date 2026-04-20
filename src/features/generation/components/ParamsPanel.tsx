@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useRef } from 'react'
 import { z } from 'zod'
-import { ImagePlus } from 'lucide-react'
+import { ImagePlus, Plus, Trash2, X } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
@@ -10,7 +10,13 @@ import { Button } from '@/components/ui/button'
 import { Dropdown } from '@/components/Dropdown'
 import { imageModels, getImageModel } from '@/providers/images'
 import { PersonaPicker } from '@/features/characters/PersonaPicker'
+import { MaskEditor } from './MaskEditor'
 import type { ModelKind } from '@/providers/types'
+
+interface LoraEntry {
+  path: string
+  scale: number
+}
 
 const MODES = [
   { value: 'standard', label: 'Standard' },
@@ -42,32 +48,44 @@ interface Props {
   values: Record<string, unknown>
   onChange: (patch: Record<string, unknown>) => void
   modelKind?: ModelKind
+  providerId?: string
 }
 
 /**
  * Introspect a top-level zod object schema and render a form for each field.
  * Supports: string, number (w/ slider if min+max), boolean, optional.
  */
-export function ParamsPanel({ schema, values, onChange, modelKind }: Props) {
+export function ParamsPanel({ schema, values, onChange, modelKind, providerId }: Props) {
   const fields = collectFields(schema)
+  // fal's flat imageModels[] picker + size presets + persona modes only
+  // apply to the stub image shell — other providers (modelslab, etc.) drive
+  // everything from their own zod schema.
+  const isFalImageShell = providerId === 'stub' && modelKind === 'image'
   const modelName = (values.model_name as string) ?? imageModels[0]?.model_name
-  const selectedImageModel = getImageModel(modelName)
+  const selectedImageModel = isFalImageShell ? getImageModel(modelName) : undefined
   const supportsEdit = selectedImageModel?.support_edit === true
-  const isImageModel = modelKind === 'image'
+  const supportsLora =
+    selectedImageModel?.fal_pipeline === 'kontext-lora-inpaint'
+  // Non-fal image providers always get the upload button — the model's
+  // run() silently falls back to t2i when images aren't supported, so we
+  // don't lose paste just because the currently selected model is text-only.
+  const showUploadButton = isFalImageShell
+    ? supportsEdit
+    : modelKind === 'image'
   const mode = (values.mode as Mode | undefined) ?? 'standard'
   const personaId = values.persona_id as string | undefined
-  const showPersonaPicker = isImageModel && mode !== 'standard'
+  const showPersonaPicker = isFalImageShell && mode !== 'standard'
 
   useEffect(() => {
-    if (imageModels.length > 0 && values.model_name == null) {
+    if (isFalImageShell && imageModels.length > 0 && values.model_name == null) {
       onChange({ model_name: imageModels[0].model_name })
     }
     // onChange intentionally omitted — parents pass a new identity each render
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [values.model_name])
+  }, [isFalImageShell, values.model_name])
 
   const handlePaste = (e: React.ClipboardEvent<HTMLDivElement>) => {
-    if (!supportsEdit) return
+    if (!showUploadButton) return
     const files: File[] = []
     for (const item of Array.from(e.clipboardData.items)) {
       if (item.kind === 'file' && item.type.startsWith('image/')) {
@@ -91,7 +109,7 @@ export function ParamsPanel({ schema, values, onChange, modelKind }: Props) {
 
   return (
     <div className="flex flex-col gap-4" onPaste={handlePaste}>
-      {isImageModel && (
+      {isFalImageShell && (
         <div className="flex flex-col gap-1.5">
           <Label>Mode</Label>
           <Dropdown
@@ -115,30 +133,30 @@ export function ParamsPanel({ schema, values, onChange, modelKind }: Props) {
           />
         </div>
       )}
-      {imageModels.length > 0 && (
-        <>
-          <div className="flex flex-col gap-1.5">
-            <Label>Model</Label>
-            <Dropdown
-              options={imageModels.map((m) => ({
-                value: m.model_name,
-                label: m.model_name,
-              }))}
-              value={modelName}
-              onChange={(v) => onChange({ model_name: v })}
-              placeholder="Select model…"
-            />
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <Label>Image size</Label>
-            <Dropdown
-              options={IMAGE_SIZE_PRESETS}
-              value={(values.image_size as string) ?? 'square_hd'}
-              onChange={(v) => onChange({ image_size: v })}
-              placeholder="Image size…"
-            />
-          </div>
-        </>
+      {isFalImageShell && imageModels.length > 0 && (
+        <div className="flex flex-col gap-1.5">
+          <Label>Model</Label>
+          <Dropdown
+            options={imageModels.map((m) => ({
+              value: m.model_name,
+              label: m.model_name,
+            }))}
+            value={modelName}
+            onChange={(v) => onChange({ model_name: v })}
+            placeholder="Select model…"
+          />
+        </div>
+      )}
+      {modelKind === 'image' && (
+        <div className="flex flex-col gap-1.5">
+          <Label>Image size</Label>
+          <Dropdown
+            options={IMAGE_SIZE_PRESETS}
+            value={(values.image_size as string) ?? 'square_hd'}
+            onChange={(v) => onChange({ image_size: v })}
+            placeholder="Image size…"
+          />
+        </div>
       )}
       {fields.map((f) => (
         <Fragment key={f.key}>
@@ -147,14 +165,120 @@ export function ParamsPanel({ schema, values, onChange, modelKind }: Props) {
             value={values[f.key]}
             onChange={(v) => onChange({ [f.key]: v })}
           />
-          {f.key === 'prompt' && supportsEdit && (
+          {f.key === 'prompt' && showUploadButton && (
             <ImageUploadButton
               current={(values.input_images as string[] | undefined) ?? []}
               onChange={(imgs) => onChange({ input_images: imgs })}
             />
           )}
+          {f.key === 'prompt' && supportsLora && (
+            <LoraPicker
+              value={(values.loras as LoraEntry[] | undefined) ?? []}
+              onChange={(loras) => onChange({ loras })}
+            />
+          )}
+          {f.key === 'prompt' &&
+            supportsLora &&
+            ((values.input_images as string[] | undefined)?.[0]) && (
+              <MaskEditor
+                sourceImage={(values.input_images as string[])[0]}
+                value={values.mask_url as string | undefined}
+                onChange={(mask_url) => onChange({ mask_url })}
+              />
+            )}
+          {f.key === 'prompt' && supportsLora && (
+            <StrengthSlider
+              value={
+                typeof values.strength === 'number' ? values.strength : 1
+              }
+              onChange={(strength) => onChange({ strength })}
+            />
+          )}
         </Fragment>
       ))}
+    </div>
+  )
+}
+
+function StrengthSlider({
+  value,
+  onChange,
+}: {
+  value: number
+  onChange: (v: number) => void
+}) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      <div className="flex items-center justify-between">
+        <Label>Strength</Label>
+        <span className="text-xs tabular-nums text-muted-foreground">
+          {value.toFixed(2)}
+        </span>
+      </div>
+      <Slider
+        min={0.05}
+        max={1}
+        step={0.05}
+        value={[value]}
+        onValueChange={(v) => onChange(v[0])}
+      />
+    </div>
+  )
+}
+
+function LoraPicker({
+  value,
+  onChange,
+}: {
+  value: LoraEntry[]
+  onChange: (v: LoraEntry[]) => void
+}) {
+  const update = (i: number, patch: Partial<LoraEntry>) =>
+    onChange(value.map((e, idx) => (idx === i ? { ...e, ...patch } : e)))
+  const remove = (i: number) => onChange(value.filter((_, idx) => idx !== i))
+  const add = () => onChange([...value, { path: '', scale: 1 }])
+
+  return (
+    <div className="flex flex-col gap-2">
+      <Label>LoRAs</Label>
+      {value.map((entry, i) => (
+        <div key={i} className="flex items-center gap-2">
+          <Input
+            value={entry.path}
+            onChange={(e) => update(i, { path: e.target.value })}
+            placeholder="https://…/lora.safetensors"
+            className="flex-1"
+          />
+          <Input
+            type="number"
+            step="0.05"
+            min={0}
+            max={2}
+            value={entry.scale}
+            onChange={(e) => update(i, { scale: Number(e.target.value) })}
+            className="w-20"
+          />
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            onClick={() => remove(i)}
+            aria-label="Remove LoRA"
+          >
+            <Trash2 className="h-4 w-4" />
+          </Button>
+        </div>
+      ))}
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        onClick={add}
+        className="w-full justify-start"
+      >
+        <Plus className="h-4 w-4" />
+        Add LoRA
+      </Button>
     </div>
   )
 }
@@ -176,8 +300,10 @@ function ImageUploadButton({
     onChange([...current, ...urls].slice(0, MAX_INPUT_IMAGES))
   }
 
+  const remove = (i: number) => onChange(current.filter((_, j) => j !== i))
+
   return (
-    <div>
+    <div className="flex flex-col gap-2">
       <input
         ref={inputRef}
         type="file"
@@ -189,6 +315,30 @@ function ImageUploadButton({
           e.target.value = ''
         }}
       />
+      {current.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          {current.map((url, i) => (
+            <div
+              key={i}
+              className="group relative h-16 w-16 overflow-hidden rounded-md border bg-muted"
+            >
+              <img
+                src={url}
+                alt=""
+                className="h-full w-full object-cover no-drag"
+              />
+              <button
+                type="button"
+                onClick={() => remove(i)}
+                aria-label="Remove image"
+                className="absolute right-0.5 top-0.5 rounded-full bg-background/80 p-0.5 opacity-0 shadow-sm transition-opacity group-hover:opacity-100"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
       <Button
         type="button"
         variant="outline"
@@ -198,7 +348,7 @@ function ImageUploadButton({
         className="w-full justify-start"
       >
         <ImagePlus className="h-4 w-4" />
-        Add image
+        {current.length === 0 ? 'Add image (or paste)' : 'Add another'}
         {current.length > 0 && (
           <span className="ml-auto text-xs text-muted-foreground">
             {current.length}/{MAX_INPUT_IMAGES}
@@ -284,6 +434,23 @@ function FieldRow({
     )
   }
 
+  if (unwrapped instanceof z.ZodEnum) {
+    const options = (unwrapped.options as readonly string[]).map((o) => ({
+      value: o,
+      label: o,
+    }))
+    return (
+      <div className="flex flex-col gap-1.5">
+        <Label>{field.label}</Label>
+        <Dropdown
+          options={options}
+          value={(value as string) ?? options[0]?.value}
+          onChange={(v) => onChange(v)}
+        />
+      </div>
+    )
+  }
+
   if (unwrapped instanceof z.ZodBoolean) {
     return (
       <div className="flex items-center justify-between">
@@ -307,15 +474,25 @@ function FieldRow({
   )
 }
 
+// Fields rendered by dedicated widgets (not the auto-form).
+const HANDLED_BY_CUSTOM_UI = new Set([
+  'image_size',
+  'input_images',
+  'mask_url',
+  'loras',
+])
+
 function collectFields(schema: z.ZodType): FieldMeta[] {
   const unwrapped = unwrap(schema)
   if (!(unwrapped instanceof z.ZodObject)) return []
   const shape = unwrapped.shape as Record<string, z.ZodTypeAny>
-  return Object.entries(shape).map(([key, field]) => ({
-    key,
-    label: labelFor(key, field),
-    schema: field,
-  }))
+  return Object.entries(shape)
+    .filter(([key]) => !HANDLED_BY_CUSTOM_UI.has(key))
+    .map(([key, field]) => ({
+      key,
+      label: labelFor(key, field),
+      schema: field,
+    }))
 }
 
 function unwrap(schema: z.ZodTypeAny): z.ZodTypeAny {

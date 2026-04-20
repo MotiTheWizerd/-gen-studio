@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git -C /home/motithewizerdlab/projects/vibe-studio log --oneline -10)",
+      "WebFetch(domain:fal.ai)",
+      "WebFetch(domain:docs.modelslab.com)",
+      "Bash(./semantix-indexer callers *)",
+      "Bash(pnpm lint *)",
+      "Bash(pnpm tsc *)",
+      "Bash(echo \"TSC_EXIT=$?\")"
+    ]
+  }
+}

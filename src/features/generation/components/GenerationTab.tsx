@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { useShallow } from 'zustand/react/shallow'
-import { Loader2, Play, Square, X } from 'lucide-react'
+import { Loader2, Play, Square } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { getModel } from '@/providers/registry'
@@ -34,41 +34,6 @@ export function GenerationTab({ tabId }: { tabId: string }) {
   return (
     <div className="grid h-full min-h-0 grid-cols-[360px_1fr]">
       <aside className="flex min-h-0 flex-col border-r bg-card/20">
-        <div className="border-b px-4 py-3">
-          {(() => {
-            const inputs =
-              (tab.params.input_images as string[] | undefined) ?? []
-            if (inputs.length === 0) return null
-            const remove = (i: number) =>
-              updateParams(tabId, {
-                input_images: inputs.filter((_, j) => j !== i),
-              })
-            return (
-              <div className="flex flex-wrap gap-2">
-                {inputs.map((url, i) => (
-                  <div
-                    key={i}
-                    className="group relative h-14 w-14 overflow-hidden rounded-md border bg-muted"
-                  >
-                    <img
-                      src={url}
-                      alt=""
-                      className="h-full w-full object-cover no-drag"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => remove(i)}
-                      aria-label="Remove image"
-                      className="absolute right-0.5 top-0.5 rounded-full bg-background/80 p-0.5 opacity-0 shadow-sm transition-opacity group-hover:opacity-100"
-                    >
-                      <X className="h-3 w-3" />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )
-          })()}
-        </div>
         <ScrollArea className="flex-1">
           <div className="p-4">
             <ParamsPanel
@@ -76,6 +41,7 @@ export function GenerationTab({ tabId }: { tabId: string }) {
               values={tab.params}
               onChange={(patch) => updateParams(tabId, patch)}
               modelKind={model.kind}
+              providerId={model.providerId}
             />
           </div>
         </ScrollArea>

@@ -15,6 +15,7 @@ export {
   runTextToImage,
   runImageEdit,
   runImageToImage,
+  runKontextLoraInpaint,
   type PipelineMedia,
   type PipelineResult,
   type PipelineContext,

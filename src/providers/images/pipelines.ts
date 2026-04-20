@@ -51,9 +51,8 @@ export async function runTextToImage(
   if (!prompt) throw new Error('Prompt is required')
 
   const input: Record<string, unknown> = {
+    ...(model.fal_extra_input ?? {}),
     prompt,
-    enable_safety_checker: false,
-    safety_tolerance: '6',
   }
   if (typeof params.seed === 'number') input.seed = params.seed
   if (typeof params.num_images === 'number') input.num_images = params.num_images
@@ -73,6 +72,13 @@ export async function runTextToImage(
   const result = await runImageModel(model, input, {
     onLog: (m) => ctx.onProgress?.({ message: m }),
   })
+
+  if (result.has_nsfw_concepts?.some((flag) => flag === true)) {
+    log.warn('fal flagged NSFW on one or more images (delivered anyway)', {
+      model: model.model_name,
+      flags: result.has_nsfw_concepts,
+    })
+  }
 
   if (ctx.signal.aborted) throw new DOMException('Aborted', 'AbortError')
 
@@ -97,27 +103,40 @@ export async function runImageEdit(
   if (!prompt) throw new Error('Prompt is required')
 
   const rawImages = (params.input_images as unknown[] | undefined) ?? []
-  const dataUris = rawImages.filter(
-    (x): x is string => typeof x === 'string' && x.startsWith('data:'),
+  const sourceUris = rawImages.filter(
+    (x): x is string =>
+      typeof x === 'string' &&
+      (x.startsWith('data:') || x.startsWith('http://') || x.startsWith('https://')),
   )
-  if (dataUris.length === 0) {
+  if (sourceUris.length === 0) {
     throw new Error('At least one input image is required for editing')
   }
+
+  const dataUriCount = sourceUris.filter((x) => x.startsWith('data:')).length
+  const httpUriCount = sourceUris.length - dataUriCount
 
   log.info('runImageEdit start', {
     model: model.model_name,
     endpoint,
-    images: dataUris.length,
+    images: sourceUris.length,
+    dataUris: dataUriCount,
+    httpUris: httpUriCount,
     promptChars: prompt.length,
     promptPreview: prompt.slice(0, 200),
   })
 
   ensureFalConfigured()
 
-  ctx.onProgress?.({ message: `uploading ${dataUris.length} image(s)…` })
-  const stopUpload = log.timer('upload input images to fal.storage')
+  if (dataUriCount > 0) {
+    ctx.onProgress?.({ message: `uploading ${dataUriCount} image(s)…` })
+  }
+  const stopUpload = log.timer('prepare input images')
   const image_urls = await Promise.all(
-    dataUris.map(async (uri, i) => {
+    sourceUris.map(async (uri, i) => {
+      if (!uri.startsWith('data:')) {
+        log.info(`passthrough input #${i}`, { url: uri })
+        return uri
+      }
       const rawBlob = await (await fetch(uri)).blob()
       if (ctx.signal.aborted) throw new DOMException('Aborted', 'AbortError')
       const blob = await compressImageForUpload(rawBlob)
@@ -136,11 +155,18 @@ export async function runImageEdit(
 
   if (ctx.signal.aborted) throw new DOMException('Aborted', 'AbortError')
 
+  const inputKey = model.fal_edit_input_key ?? 'image_urls'
   const input: Record<string, unknown> = {
+    ...(model.fal_extra_input ?? {}),
     prompt,
-    image_urls,
-    enable_safety_checker: false,
-    safety_tolerance: '6',
+  }
+  if (inputKey === 'image_url') {
+    input.image_url = image_urls[0]
+    if (image_urls.length > 1) {
+      log.warn(`${model.model_name} uses single image_url; ignoring ${image_urls.length - 1} extra image(s)`)
+    }
+  } else {
+    input.image_urls = image_urls
   }
   if (typeof params.seed === 'number') input.seed = params.seed
   if (typeof params.num_images === 'number') input.num_images = params.num_images
@@ -176,7 +202,15 @@ export async function runImageEdit(
   log.info('runImageEdit result', {
     images: result.images.length,
     requestId: result.requestId,
+    has_nsfw_concepts: result.has_nsfw_concepts,
   })
+
+  if (result.has_nsfw_concepts?.some((flag) => flag === true)) {
+    log.warn('fal flagged NSFW on one or more images (delivered anyway)', {
+      model: model.model_name,
+      flags: result.has_nsfw_concepts,
+    })
+  }
 
   if (ctx.signal.aborted) throw new DOMException('Aborted', 'AbortError')
 
@@ -191,3 +225,145 @@ export async function runImageEdit(
 
 // Back-compat alias
 export const runImageToImage = runImageEdit
+
+async function toBlob(uri: string): Promise<Blob> {
+  const res = await fetch(uri)
+  if (!res.ok) throw new Error(`Failed to fetch ${uri}: ${res.status}`)
+  return res.blob()
+}
+
+async function blobDimensions(blob: Blob): Promise<{ width: number; height: number }> {
+  const url = URL.createObjectURL(blob)
+  try {
+    return await new Promise((resolve, reject) => {
+      const img = new Image()
+      img.onload = () => resolve({ width: img.naturalWidth, height: img.naturalHeight })
+      img.onerror = () => reject(new Error('Failed to decode image for dimensions'))
+      img.src = url
+    })
+  } finally {
+    URL.revokeObjectURL(url)
+  }
+}
+
+async function makeWhiteMaskPng(width: number, height: number): Promise<Blob> {
+  const canvas = document.createElement('canvas')
+  canvas.width = width
+  canvas.height = height
+  const ctx = canvas.getContext('2d')
+  if (!ctx) throw new Error('2D canvas context unavailable')
+  ctx.fillStyle = '#ffffff'
+  ctx.fillRect(0, 0, width, height)
+  return await new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob(
+      (b) => (b ? resolve(b) : reject(new Error('canvas.toBlob returned null'))),
+      'image/png',
+    )
+  })
+}
+
+export async function runKontextLoraInpaint(
+  model: ImageModel,
+  params: Record<string, unknown>,
+  ctx: PipelineContext,
+): Promise<PipelineResult> {
+  const prompt = String(params.prompt ?? '').trim()
+  if (!prompt) throw new Error('Prompt is required')
+
+  const rawImages = (params.input_images as unknown[] | undefined) ?? []
+  const sourceUris = rawImages.filter(
+    (x): x is string =>
+      typeof x === 'string' &&
+      (x.startsWith('data:') || x.startsWith('http://') || x.startsWith('https://')),
+  )
+  if (sourceUris.length < 1) {
+    throw new Error(
+      `${model.model_name} needs at least one image (source). Add a second image to use it as the style reference.`,
+    )
+  }
+
+  ensureFalConfigured()
+
+  ctx.onProgress?.({ message: 'preparing source + reference + mask…' })
+  const stopPrep = log.timer('inpaint prep')
+
+  const sourceUri = sourceUris[0]
+  const referenceUri = sourceUris[1] ?? sourceUris[0]
+  const sourceBlobRaw = await toBlob(sourceUri)
+  const sourceBlob = await compressImageForUpload(sourceBlobRaw)
+  const { width, height } = await blobDimensions(sourceBlob)
+
+  const userMask = typeof params.mask_url === 'string' ? params.mask_url : undefined
+  const maskBlob = userMask
+    ? await toBlob(userMask)
+    : await makeWhiteMaskPng(width, height)
+  const maskSource = userMask ? 'user-drawn' : 'auto-full-white'
+
+  if (ctx.signal.aborted) throw new DOMException('Aborted', 'AbortError')
+
+  const [image_url, mask_url, reference_image_url] = await Promise.all([
+    fal.storage.upload(sourceBlob),
+    fal.storage.upload(maskBlob),
+    referenceUri.startsWith('data:') || referenceUri.startsWith('blob:')
+      ? toBlob(referenceUri)
+          .then((b) => compressImageForUpload(b))
+          .then((b) => fal.storage.upload(b))
+      : Promise.resolve(referenceUri),
+  ])
+  stopPrep()
+  log.info('inpaint uploads', {
+    image_url,
+    mask_url,
+    maskSource,
+    reference_image_url,
+    sourceSize: { width, height },
+  })
+
+  const input: Record<string, unknown> = {
+    ...(model.fal_extra_input ?? {}),
+    prompt,
+    image_url,
+    mask_url,
+    reference_image_url,
+  }
+  if (typeof params.seed === 'number') input.seed = params.seed
+  if (typeof params.num_images === 'number') input.num_images = params.num_images
+  input.strength =
+    typeof params.strength === 'number' ? params.strength : 1
+  if (Array.isArray(params.loras)) {
+    const cleaned = (params.loras as Array<{ path?: unknown; scale?: unknown }>)
+      .map((l) => ({
+        path: typeof l.path === 'string' ? l.path.trim() : '',
+        scale: typeof l.scale === 'number' ? l.scale : 1,
+      }))
+      .filter((l) => l.path.length > 0)
+    if (cleaned.length > 0) input.loras = cleaned
+  }
+
+  ctx.onProgress?.({ message: `inpainting with ${model.model_name}…` })
+  const stopInpaint = log.timer(`fal inpaint ${model.fal_endpoint}`)
+  const result = await runImageModel(model, input, {
+    signal: ctx.signal,
+    onLog: (m) => ctx.onProgress?.({ message: m }),
+  })
+  stopInpaint()
+  log.info('runKontextLoraInpaint result', {
+    images: result.images.length,
+    requestId: result.requestId,
+    has_nsfw_concepts: result.has_nsfw_concepts,
+  })
+
+  if (result.has_nsfw_concepts?.some((flag) => flag === true)) {
+    log.warn('fal flagged NSFW on one or more images (delivered anyway)', {
+      model: model.model_name,
+      flags: result.has_nsfw_concepts,
+    })
+  }
+
+  if (ctx.signal.aborted) throw new DOMException('Aborted', 'AbortError')
+
+  const media = await Promise.all(
+    result.images.map((img) => fetchAsBlob(img, ctx.signal)),
+  )
+  return { media, raw: result.raw }
+}

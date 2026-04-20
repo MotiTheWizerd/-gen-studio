@@ -1,13 +1,14 @@
 import type { AnyModel, Provider } from './types'
 import { stubProvider } from './stub'
 import { visionProvider } from './vision'
+import { modelslabProvider } from './modelslab'
 
 /**
  * Add new providers here. Each one is self-contained in its own folder and
  * registers a handful of models. Keep the array order — it drives the
  * new-tab picker.
  */
-export const providers: Provider[] = [stubProvider, visionProvider]
+export const providers: Provider[] = [stubProvider, visionProvider, modelslabProvider]
 
 export function allModels(): AnyModel[] {
   return providers.flatMap((p) => p.models)

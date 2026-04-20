@@ -6,6 +6,7 @@ import {
   imageModels,
   runTextToImage,
   runImageEdit,
+  runKontextLoraInpaint,
 } from '@/providers/images'
 import { saveGeneration } from '@/db/generations.repo'
 import { useTabsStore } from '@/features/tabs/tabs.store'
@@ -31,9 +32,14 @@ export function useRunJob(tabId: string) {
       return
     }
 
-    const selectedName =
-      (tab.params.model_name as string | undefined) ??
-      (model.kind === 'image' ? imageModels[0]?.model_name : undefined)
+    // The imageModels[] flat system is wired only to the stub provider's
+    // image shell — it's the "catch-all" that fans out to the fal-hosted
+    // model dropdown inside ParamsPanel. Other image-kind providers (like
+    // modelslab) must use their own Model.run() path.
+    const usesFalImageShell = model.providerId === 'stub' && model.kind === 'image'
+    const selectedName = usesFalImageShell
+      ? ((tab.params.model_name as string | undefined) ?? imageModels[0]?.model_name)
+      : undefined
     const imageModel = selectedName ? getImageModel(selectedName) : undefined
 
     const controller = new AbortController()
@@ -88,18 +94,26 @@ export function useRunJob(tabId: string) {
       if (imageModel) {
         const inputImages =
           (paramsSnapshot.input_images as string[] | undefined) ?? []
+        const useInpaint = imageModel.fal_pipeline === 'kontext-lora-inpaint'
         const useEdit =
-          imageModel.model_type === 'image-to-image' ||
-          (imageModel.support_edit && inputImages.length > 0)
-        const pipeline = useEdit ? runImageEdit : runTextToImage
+          !useInpaint &&
+          (imageModel.model_type === 'image-to-image' ||
+            (imageModel.support_edit && inputImages.length > 0))
+        const pipeline = useInpaint
+          ? runKontextLoraInpaint
+          : useEdit
+            ? runImageEdit
+            : runTextToImage
         const r = await pipeline(imageModel, paramsSnapshot, {
           signal: controller.signal,
           onProgress: (p) => updateJob(jobId, { pct: p.pct, message: p.message }),
         })
         media = r.media
-        modelIdForSave = useEdit
-          ? (imageModel.fal_edit_endpoint ?? imageModel.fal_endpoint)
-          : imageModel.fal_endpoint
+        modelIdForSave = useInpaint
+          ? imageModel.fal_endpoint
+          : useEdit
+            ? (imageModel.fal_edit_endpoint ?? imageModel.fal_endpoint)
+            : imageModel.fal_endpoint
         providerIdForSave = 'fal'
       } else {
         const r = await model.run(paramsSnapshot as never, {
